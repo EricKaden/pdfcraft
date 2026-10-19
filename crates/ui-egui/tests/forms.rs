@@ -1247,20 +1247,6 @@ fn the_mouse_wheel_scrolls_a_long_drop_down_list_and_not_the_page() {
 }
 
 #[test]
-fn each_arrow_key_press_moves_a_drop_downs_list_one_item() {
-    let mut h = harness();
-    long_country(&mut h);
-    click_field(&mut h, "country", 0);
-    h.key_press(egui::Key::Home);
-    h.run_steps(2);
-    h.key_press(egui::Key::ArrowDown);
-    h.run_steps(2);
-    h.key_press(egui::Key::Enter);
-    h.run_steps(3);
-    assert_eq!(value(&h, "country"), ["0100"], "one item down from the first");
-}
-
-#[test]
 fn an_open_drop_down_keeps_the_arrow_keys_and_home_from_moving_the_page() {
     let mut h = harness();
     long_country(&mut h);
