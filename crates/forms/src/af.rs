@@ -673,21 +673,22 @@ pub fn parse_date(text: &str, fmt: &str) -> Option<DateTime> {
     flush(&mut cur, &mut nums, &mut month_name);
     let mut dt = DateTime { y: 0, m: 1, d: 1, hh: 0, mm: 0, ss: 0 };
     // The next number for a field. A field joined to the next one in the format ("yyyymmdd")
-    // takes only its own width from a longer run of digits and leaves the rest for the next, but
-    // only when fewer runs were typed than the fields still to fill (`need`, this one included):
-    // with separators each run is one field's number, so "2026-10-18" keeps its four-digit
-    // year in a yymmdd field. What is left of a split run (`tail`: the front of `nums` is one)
-    // must fill its field exactly, so "202610018" leaves "018" for dd and is refused, while a
-    // number typed on its own keeps its leeway: it is split only when its rest can fill the next
-    // field (`next_width`), so "2026 10 018" is the 18th even when optional times follow.
-    // `None` when there is no number left, it doesn't fit a u32, or such a rest has the wrong
-    // width.
+    // takes only its own width from a longer run of digits and leaves the rest for the next.
+    // A run typed on its own is split only when fewer runs were typed than the fields of its kind
+    // still to fill (`need`, this one included: date fields for a date field, time fields for a
+    // time field, since times may be left out), and only when its rest can fill the next field
+    // (`next_width`): with separators each run is one field's number, so "2026-10-18" keeps its
+    // four-digit year in a yymmdd or yymmddHHMM field, and "2026 10 018" is the 18th. What is left
+    // of a split run (`tail`: the front of `nums` is one) goes on being split along the fields
+    // written side by side, and must fill its last field exactly, so "202610018" leaves "018" for
+    // dd and is refused. `None` when there is no number left, it doesn't fit a u32, or such a
+    // rest has the wrong width.
     let next_number = |nums: &mut VecDeque<String>, tail: &mut bool, part: &Part, need: usize, next_width: usize| -> Option<u32> {
         let run = nums.pop_front()?;
         let was_tail = std::mem::replace(tail, false);
         let short = nums.len() < need.saturating_sub(1);
         let digits = match (run.get(..part.width), run.get(part.width..)) {
-            (Some(head), Some(rest)) if part.joined && part.width > 0 && short && !rest.is_empty() && (was_tail || rest.len() >= next_width) => {
+            (Some(head), Some(rest)) if part.joined && part.width > 0 && !rest.is_empty() && (was_tail || (short && rest.len() >= next_width)) => {
                 nums.push_front(rest.to_string());
                 *tail = true;
                 head
@@ -699,14 +700,19 @@ pub fn parse_date(text: &str, fmt: &str) -> Option<DateTime> {
     };
     let parts = order(fmt);
     let takes_number = |p: &Part| matches!(p.kind, 'y' | 'd' | 'H' | 'M' | 's') || (p.kind == 'm' && month_name.is_none());
-    let mut wanted = parts.iter().filter(|p| takes_number(p)).count();
+    let is_time = |p: &Part| matches!(p.kind, 'H' | 'M' | 's');
+    // The fields of each kind still to fill: [date, time].
+    let mut wanted = [parts.iter().filter(|p| takes_number(p) && !is_time(p)).count(), parts.iter().filter(|p| is_time(p)).count()];
     let mut tail = false;
     let mut have_y = false;
     for (i, part) in parts.iter().enumerate() {
-        let need = wanted;
+        let kind = usize::from(is_time(part));
+        let need = wanted.get(kind).copied().unwrap_or(0);
         let next_width = parts.get(i + 1).map_or(0, |p| p.width);
-        if takes_number(part) {
-            wanted = wanted.saturating_sub(1);
+        if takes_number(part)
+            && let Some(left) = wanted.get_mut(kind)
+        {
+            *left = left.saturating_sub(1);
         }
         let take = |nums: &mut VecDeque<String>, tail: &mut bool| next_number(nums, tail, part, need, next_width);
         match part.kind {
@@ -1464,6 +1470,18 @@ mod undelimited_tests {
         assert_eq!((dt.y, dt.m, dt.d, dt.hh, dt.mm), (2026, 10, 18, 0, 0));
         assert_eq!(ymd(parse_date("20261018", "yyyymmddHHMM")), Some((2026, 10, 18)));
         assert_eq!(parse_date("2026 10 18 1430", "yyyymmdd HHMM").map(|d| (d.hh, d.mm)), Some((14, 30)));
+    }
+
+    /// The date's runs are matched against the date's fields, the time's against the time's:
+    /// optional times left out don't make a separated four-digit year look like it needs
+    /// splitting, and a time typed in one run still fills HHMM.
+    #[test]
+    fn date_and_time_fields_are_counted_apart() {
+        let dt = parse_date("2026-10-18", "yymmddHHMM").expect("a date with the time left out");
+        assert_eq!((dt.y, dt.m, dt.d, dt.hh, dt.mm), (2026, 10, 18, 0, 0));
+        assert_eq!(parse_date("20261018 1430", "yyyymmddHHMM").map(|d| (d.y, d.m, d.d, d.hh, d.mm)), Some((2026, 10, 18, 14, 30)));
+        assert_eq!(parse_date("2026-10-18 1430", "yyyy-mm-dd HHMM").map(|d| (d.hh, d.mm)), Some((14, 30)));
+        assert_eq!(parse_date("20261018143005", "yyyymmddHHMMss").map(|d| (d.d, d.hh, d.mm, d.ss)), Some((18, 14, 30, 5)));
     }
 
     /// A run of more digits than fit in a u32 ("yyyymmddHHMMss") is split, not dropped.
