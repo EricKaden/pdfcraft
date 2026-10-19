@@ -1404,9 +1404,9 @@ mod undelimited_tests {
         dt.map(|d| (d.y, d.m, d.d))
     }
 
-    /// Fields written side by side in the format ("yyyymmdd", the date format of US Army forms
-    /// such as DA Form 31) take their fixed widths from one run of typed digits. Every such
-    /// date used to be refused, because the run was read as a single number.
+    /// Fields written side by side in the format ("yyyymmdd") take their fixed widths from one
+    /// run of typed digits. Every such date used to be refused, because the run was read as a
+    /// single number.
     #[test]
     fn digits_typed_without_separators_fill_adjacent_fields() {
         assert_eq!(ymd(parse_date("20261018", "yyyymmdd")), Some((2026, 10, 18)));
@@ -1414,7 +1414,7 @@ mod undelimited_tests {
         assert_eq!(ymd(parse_date("10182026", "mmddyyyy")), Some((2026, 10, 18)));
         assert_eq!(ymd(parse_date("18102026", "ddmmyyyy")), Some((2026, 10, 18)));
         let f = Format::Date("yyyymmdd".into());
-        assert_eq!(keystroke(&f, "Todays_Date", "20261018"), Ok("20261018".into()));
+        assert_eq!(keystroke(&f, "Date", "20261018"), Ok("20261018".into()));
         assert_eq!(format_value(&f, "20261018"), "20261018");
     }
 
@@ -1438,10 +1438,10 @@ mod undelimited_tests {
     #[test]
     fn impossible_undelimited_dates_are_refused() {
         let f = Format::Date("yyyymmdd".into());
-        assert!(keystroke(&f, "Todays_Date", "20261340").is_err(), "no month 13");
-        assert!(keystroke(&f, "Todays_Date", "20260230").is_err(), "no 30 February");
-        assert!(keystroke(&f, "Todays_Date", "2026101899").is_err(), "digits left over make no day");
-        assert!(keystroke(&f, "Todays_Date", "2026").is_err(), "a year alone is not a date");
+        assert!(keystroke(&f, "Date", "20261340").is_err(), "no month 13");
+        assert!(keystroke(&f, "Date", "20260230").is_err(), "no 30 February");
+        assert!(keystroke(&f, "Date", "2026101899").is_err(), "digits left over make no day");
+        assert!(keystroke(&f, "Date", "2026").is_err(), "a year alone is not a date");
     }
 
     /// What is left of a split run fills its field exactly: "202610018" leaves "018" for the

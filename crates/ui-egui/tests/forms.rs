@@ -185,8 +185,8 @@ fn date_fields_offer_a_calendar() {
     assert_eq!(value(&h, "due"), vec![format!("{nm:02}/15/{ny}")], "picked in the field's format");
 }
 
-/// A date format with its fields side by side ("yyyymmdd", the date format of US Army forms
-/// such as DA Form 31) refused every typed date, and its calendar opened on today's month.
+/// A date format with its fields side by side ("yyyymmdd") refused every typed date, and its
+/// calendar opened on today's month.
 #[test]
 fn an_undelimited_date_field_takes_a_typed_date_and_its_calendar_opens_on_it() {
     use egui_kittest::kittest::Queryable;
