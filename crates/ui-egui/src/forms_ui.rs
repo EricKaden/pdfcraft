@@ -605,6 +605,25 @@ pub(crate) fn overlay(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, f
                 |ui| {
                     ui.style_mut().visuals = egui::Visuals::light();
                     ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+                    // A scroll bar that stays shown beside the items, so a longer list says so and
+                    // where it is scrolled to; it replaces the fade at the bottom edge.
+                    ui.spacing_mut().scroll = egui::style::ScrollStyle {
+                        bar_width: 8.0,
+                        dormant_background_opacity: 1.0,
+                        active_background_opacity: 1.0,
+                        interact_background_opacity: 1.0,
+                        dormant_handle_opacity: 1.0,
+                        active_handle_opacity: 1.0,
+                        interact_handle_opacity: 1.0,
+                        ..egui::style::ScrollStyle::solid()
+                    };
+                    ui.spacing_mut().scroll.fade.strength = 0.0;
+                    // The bar's track and handle, gray on the white list.
+                    let v = ui.visuals_mut();
+                    v.extreme_bg_color = Color32::from_gray(236);
+                    v.widgets.inactive.bg_fill = Color32::from_gray(168);
+                    v.widgets.hovered.bg_fill = Color32::from_gray(132);
+                    v.widgets.active.bg_fill = Color32::from_gray(100);
                     egui::Frame::new().fill(Color32::WHITE).stroke(Stroke::new(1.0, Color32::from_gray(64))).show(ui, |ui| {
                         let width = rect.width().max(24.0);
                         ui.set_width(width);

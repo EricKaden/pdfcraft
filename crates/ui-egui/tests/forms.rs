@@ -1122,3 +1122,19 @@ fn a_drop_downs_list_opens_as_wide_as_the_field_without_its_internal_name() {
     h.run_steps(4);
     assert_eq!(value(&h, "country"), ["fr"]);
 }
+
+#[test]
+fn a_long_drop_down_list_keeps_its_scroll_bar_beside_the_items() {
+    let mut h = harness();
+    let options: Vec<String> = (0..30).map(|i| format!("{i:02}00")).collect();
+    assert!(h.state_mut().apply_edit(pdfcraft_engine::Edit::SetFieldProps {
+        name: "country".into(),
+        props: Box::new(pdfcraft_engine::FieldProps { options: Some(options), ..Default::default() }),
+    }));
+    h.run_steps(3);
+    click_field(&mut h, "country", 0);
+    let country = field_rect(&h, "country");
+    let first = egui_kittest::kittest::Queryable::get_by_label(&h, "0000").rect();
+    // A scroll bar that stays shown takes its own room, so people see there is more below.
+    assert!(first.right() <= country.right() - 6.0, "{first:?} leaves room for the bar in {country:?}");
+}
