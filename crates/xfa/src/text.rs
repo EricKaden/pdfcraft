@@ -190,8 +190,9 @@ pub fn layout(rich: &RichText, rect: Rect, para: &Para, base: &Face, embed: &dyn
     }
     // A negative textIndent is a hanging indent: the first line starts left of the others. It
     // never starts left of the box, so the others move in to make room, as other viewers lay
-    // such labels out.
-    let margin_left = para.margin_left.max(-para.text_indent);
+    // such labels out; never past the box's right edge, however wide the hang.
+    let hang = (-para.text_indent).min((rect.w - para.margin_right - 1.0).max(0.0));
+    let margin_left = para.margin_left.max(hang);
     // Where the first line starts, from the others.
     let first_indent = para.text_indent.max(-margin_left);
     let avail = (rect.w - margin_left - para.margin_right).max(1.0);

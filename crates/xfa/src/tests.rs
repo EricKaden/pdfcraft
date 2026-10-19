@@ -182,6 +182,24 @@ fn a_negative_text_indent_hangs_the_first_line_and_indents_the_rest() {
 }
 
 #[test]
+fn a_hang_wider_than_the_box_keeps_every_line_inside_it() {
+    // A 58pt box hanging its first line by 100pt, right-aligned: every line still starts and
+    // ends inside the box.
+    let xdp = r##"<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/"><template xmlns="http://www.xfa.org/schema/xfa-template/3.3/">
+<subform name="form" layout="tb">
+ <pageSet><pageArea name="front"><contentArea x="0.5in" y="0.5in" w="7.5in" h="10in"/><medium short="8.5in" long="11in"/></pageArea></pageSet>
+ <draw name="label" w="58pt" h="2in"><value><text>AB CD EF</text></value><font typeface="Arial" size="8pt"/><para hAlign="right" textIndent="-100pt" lineHeight="8pt"/></draw>
+</subform>
+</template></xdp:xdp>"##;
+    let form = layout_xml(xdp).unwrap();
+    for item in &form.pages[0].items {
+        let Item::Text(s) = item else { continue };
+        let right = s.x + s.face.width(s.text.trim_end());
+        assert!(s.x >= 36.0 - 1e-6 && right <= 36.0 + 58.0 + 1e-6, "{:?} runs from {} to {right}", s.text, s.x);
+    }
+}
+
+#[test]
 fn tables_break_across_pages_and_repeat_their_header_row() {
     let form = layout_xml(&template(40)).unwrap();
     assert!(form.pages.len() >= 3, "{} pages", form.pages.len());
