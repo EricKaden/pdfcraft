@@ -1072,3 +1072,53 @@ fn auto_size_fields_shrink_and_wrap_typed_text_to_fit_their_box() {
     // An explicit size is kept, as in Acrobat: the text may then run past the box.
     assert_eq!(on_screen_fit(&h, "fixed", long).0, 10.0);
 }
+
+fn field_rect(h: &Harness<'static, PdfCraftApp>, name: &str) -> egui::Rect {
+    let s = h.state();
+    let doc = s.session.get(s.views[0].id).unwrap();
+    let f = doc.form.iter().find(|f| f.name == name).unwrap();
+    pdfcraft_ui_egui::forms_ui::field_screen_rect(&s.views[0], &doc.info, f, 0).expect("on screen")
+}
+
+/// Filled triangles painted inside `within`, at any depth of the frame's shapes.
+fn triangles_in(h: &Harness<'static, PdfCraftApp>, within: egui::Rect) -> Vec<Vec<egui::Pos2>> {
+    fn walk(shape: &egui::Shape, within: egui::Rect, out: &mut Vec<Vec<egui::Pos2>>) {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|s| walk(s, within, out)),
+            egui::Shape::Path(p) if p.points.len() == 3 && p.fill != egui::Color32::TRANSPARENT && p.points.iter().all(|q| within.contains(*q)) => {
+                out.push(p.points.clone())
+            }
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    for c in &h.output().shapes {
+        walk(&c.shape, within, &mut out);
+    }
+    out
+}
+
+#[test]
+fn a_drop_down_shows_its_arrow_and_text_fields_do_not() {
+    let mut h = harness();
+    h.run_steps(2);
+    let country = field_rect(&h, "country");
+    let arrows = triangles_in(&h, country);
+    assert_eq!(arrows.len(), 1, "one arrow in the drop-down: {arrows:?}");
+    let tip = arrows[0].iter().fold(egui::Pos2::ZERO, |a, p| egui::pos2(a.x.max(p.x), a.y.max(p.y)));
+    assert!(tip.x > country.center().x, "at the right of the box");
+    assert!(triangles_in(&h, field_rect(&h, "city")).is_empty(), "a text field has none");
+}
+
+#[test]
+fn a_drop_downs_list_opens_as_wide_as_the_field_without_its_internal_name() {
+    let mut h = harness();
+    click_field(&mut h, "country", 0);
+    let country = field_rect(&h, "country");
+    assert!(egui_kittest::kittest::Queryable::query_by_label(&h, "country").is_none(), "the field's name isn't shown");
+    let item = egui_kittest::kittest::Queryable::get_by_label(&h, "France").rect();
+    assert!((item.left() - country.left()).abs() <= 2.0 && item.right() <= country.right() + 1.0, "{item:?} in {country:?}");
+    egui_kittest::kittest::Queryable::get_by_label(&h, "France").click();
+    h.run_steps(4);
+    assert_eq!(value(&h, "country"), ["fr"]);
+}

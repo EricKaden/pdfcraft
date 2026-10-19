@@ -4440,8 +4440,8 @@ milestone = "M6"
 status = "shipped"
 commands = ["form.fields"]
 tools = ["form_fill"]
-evidence = ["crates/ui-egui/tests/forms.rs::check_boxes_radios_and_choices", "crates/forms/src/tests.rs::choices_accept_exports_or_display_text"]
-notes = "combo and list boxes, multi-select lists; editable combo boxes accept free text"
+evidence = ["crates/ui-egui/tests/forms.rs::check_boxes_radios_and_choices", "crates/ui-egui/tests/forms.rs::a_drop_downs_list_opens_as_wide_as_the_field_without_its_internal_name", "crates/forms/src/tests.rs::choices_accept_exports_or_display_text"]
+notes = "combo and list boxes, multi-select lists; editable combo boxes accept free text. A combo box shows its arrow on screen and opens its list under the field, as wide as the box and in its text size, black on white; the list takes no arrow keys yet"
 
 [[feature]]
 id = "form.push-buttons"

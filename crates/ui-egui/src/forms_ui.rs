@@ -13,7 +13,6 @@ use pdfcraft_engine::{Edit, FieldValue, FormField, FormFieldKind, FormWidget, fi
 use pdfcraft_render::DocInfo;
 
 use crate::canvas::{DocView, PageXform};
-use crate::theme::Tokens;
 
 const FOCUS_BLUE: Color32 = Color32::from_rgb(0x14, 0x73, 0xE6);
 /// Background of the in-place text field editor, the same in every theme.
@@ -363,8 +362,25 @@ pub(crate) fn paint_page(ui: &egui::Ui, painter: &egui::Painter, xf: &PageXform,
             } else if fillable(f) && pointer.is_some_and(|p| r.contains(p)) {
                 painter.rect_stroke(r, CornerRadius::same(1), Stroke::new(1.0, FOCUS_BLUE.gamma_multiply(0.8)), egui::StrokeKind::Outside);
             }
+            if f.kind == FormFieldKind::Combo && fillable(f) {
+                paint_drop_down_arrow(painter, r);
+            }
         }
     }
+}
+
+/// A drop-down's arrow at the right of its box, which says the field opens a list (its page
+/// appearance shows only the value). Drawn on screen only, not into the file.
+fn paint_drop_down_arrow(painter: &egui::Painter, r: Rect) {
+    let width = (r.height() * 0.45).clamp(5.0, 12.0);
+    let inset = (r.height() * 0.25).clamp(2.0, 6.0);
+    // Too narrow a box keeps its value visible instead.
+    if r.width() < width * 3.0 {
+        return;
+    }
+    let (x, y, half) = (r.max.x - inset - width / 2.0, r.center().y, width / 2.0);
+    let points = vec![egui::pos2(x - half, y - half / 2.0), egui::pos2(x + half, y - half / 2.0), egui::pos2(x, y + half / 2.0)];
+    painter.add(egui::Shape::convex_polygon(points, Color32::BLACK, Stroke::NONE));
 }
 
 /// The size, in points, a text field shows `text` at on screen: its `/DA` size, or for auto size
@@ -490,7 +506,6 @@ pub(crate) fn overlay(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, f
     let xf = view.page_xform(page)?;
     let rect = widget_rect(&xf, info, page, w.rect);
     let zoom = xf.rect.width() / xf.pw.max(1.0);
-    let t = Tokens::get(ctx);
     let mut edit = None;
     let mut close = false;
     let mut next: Option<bool> = None; // Tab / Shift+Tab
@@ -581,24 +596,47 @@ pub(crate) fn overlay(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, f
             }
         }
         FormFieldKind::Combo => {
-            let resp = egui::Area::new(egui::Id::new(("form-choices", view.id.0)))
-                .order(egui::Order::Foreground)
-                .fixed_pos(rect.left_bottom() + vec2(0.0, 2.0))
-                .show(ctx, |ui| {
-                    egui::Frame::popup(ui.style()).show(ui, |ui| {
-                        ui.set_min_width(rect.width().max(160.0));
-                        ui.label(egui::RichText::new(&f.name).small().color(t.text_faint));
-                        egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
+            // The list opens under the field and looks like it, as other viewers draw it: as wide as
+            // the box, in its text size, black on white, without the field's internal name.
+            let size = (field_text_size(&ctx.layer_painter(egui::LayerId::background()), f, w, "") * zoom).clamp(6.0, 48.0);
+            let row = (size * 1.3).ceil();
+            let resp = egui::Area::new(egui::Id::new(("form-choices", view.id.0))).order(egui::Order::Foreground).fixed_pos(rect.left_bottom()).show(
+                ctx,
+                |ui| {
+                    ui.style_mut().visuals = egui::Visuals::light();
+                    ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+                    egui::Frame::new().fill(Color32::WHITE).stroke(Stroke::new(1.0, Color32::from_gray(64))).show(ui, |ui| {
+                        let width = rect.width().max(24.0);
+                        ui.set_width(width);
+                        egui::ScrollArea::vertical().max_height(row * 9.0).show(ui, |ui| {
                             for (export, display) in &f.options {
                                 let on = f.value.first() == Some(export);
-                                if ui.selectable_label(on, display).clicked() {
+                                let (r, item) = ui.allocate_exact_size(vec2(ui.available_width(), row), egui::Sense::click());
+                                item.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, on, display));
+                                let (fill, ink) = if on {
+                                    (Color32::from_rgb(0x2F, 0x6F, 0xE0), Color32::WHITE)
+                                } else if item.hovered() {
+                                    (Color32::from_gray(222), Color32::BLACK)
+                                } else {
+                                    (Color32::WHITE, Color32::BLACK)
+                                };
+                                ui.painter().rect_filled(r, CornerRadius::ZERO, fill);
+                                ui.painter().with_clip_rect(r).text(
+                                    egui::pos2(r.min.x + 3.0, r.center().y),
+                                    egui::Align2::LEFT_CENTER,
+                                    display,
+                                    egui::FontId::proportional(size),
+                                    ink,
+                                );
+                                if item.clicked() {
                                     edit = Some(Edit::SetFieldValue { name: f.name.clone(), value: FieldValue::Choice(vec![export.clone()]) });
                                     close = true;
                                 }
                             }
                         });
                     });
-                });
+                },
+            );
             let clicked_away = ctx.input(|i| i.pointer.any_click())
                 && !resp.response.contains_pointer()
                 && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| rect.contains(p));
