@@ -1138,3 +1138,87 @@ fn a_long_drop_down_list_keeps_its_scroll_bar_beside_the_items() {
     // A scroll bar that stays shown takes its own room, so people see there is more below.
     assert!(first.right() <= country.right() - 6.0, "{first:?} leaves room for the bar in {country:?}");
 }
+
+/// Where `text` is drawn in the last frame, if anywhere.
+fn text_rect(h: &Harness<'static, PdfCraftApp>, text: &str) -> Option<egui::Rect> {
+    fn walk(shape: &egui::Shape, text: &str) -> Option<egui::Rect> {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().find_map(|s| walk(s, text)),
+            egui::Shape::Text(t) if t.galley.text() == text => Some(egui::Rect::from_min_size(t.pos, t.galley.size())),
+            _ => None,
+        }
+    }
+    h.output().shapes.iter().find_map(|c| walk(&c.shape, text))
+}
+
+fn long_country(h: &mut Harness<'static, PdfCraftApp>) {
+    let options: Vec<String> = (0..30).map(|i| format!("{i:02}00")).collect();
+    assert!(h.state_mut().apply_edit(pdfcraft_engine::Edit::SetFieldProps {
+        name: "country".into(),
+        props: Box::new(pdfcraft_engine::FieldProps { options: Some(options), ..Default::default() }),
+    }));
+    h.run_steps(3);
+}
+
+#[test]
+fn a_drop_downs_list_aligns_its_items_as_the_field_does() {
+    let mut h = harness();
+    assert!(h.state_mut().apply_edit(pdfcraft_engine::Edit::SetFieldProps {
+        name: "country".into(),
+        props: Box::new(pdfcraft_engine::FieldProps { quadding: Some(1), ..Default::default() }),
+    }));
+    h.run_steps(3);
+    click_field(&mut h, "country", 0);
+    let country = field_rect(&h, "country");
+    let france = text_rect(&h, "France").expect("drawn");
+    assert!((france.center().x - country.center().x).abs() <= 2.0, "centered as the field is: {france:?} in {country:?}");
+}
+
+#[test]
+fn the_arrow_keys_move_through_a_drop_downs_list_and_enter_chooses() {
+    let mut h = harness();
+    click_field(&mut h, "country", 0);
+    h.key_press(egui::Key::ArrowDown);
+    h.run_steps(1);
+    h.key_press(egui::Key::ArrowDown);
+    h.run_steps(1);
+    assert!(value(&h, "country").is_empty(), "the arrows only move through the list");
+    h.key_press(egui::Key::Enter);
+    h.run_steps(3);
+    assert_eq!(value(&h, "country"), ["fr"]);
+    assert!(h.state().views[0].forms.focus.is_none(), "Enter closes the list");
+    // Reopened, the list starts from the field's value.
+    click_field(&mut h, "country", 0);
+    h.key_press(egui::Key::ArrowUp);
+    h.run_steps(1);
+    h.key_press(egui::Key::Enter);
+    h.run_steps(3);
+    assert_eq!(value(&h, "country"), ["ca"]);
+}
+
+#[test]
+fn a_long_drop_down_list_scrolls_by_its_arrow_button_and_to_its_end() {
+    let mut h = harness();
+    long_country(&mut h);
+    click_field(&mut h, "country", 0);
+    assert!(egui_kittest::kittest::Queryable::query_by_label(&h, "0900").is_none(), "nine rows show");
+    let country = field_rect(&h, "country");
+    let first = egui_kittest::kittest::Queryable::get_by_label(&h, "0000").rect();
+    // The bar's down button, at the bottom of the bar beside the ninth row.
+    let bar = country.right() - first.right();
+    let down = egui::pos2(country.right() - bar / 2.0, first.top() + first.height() * 9.0 - bar / 2.0);
+    h.hover_at(down);
+    h.run_steps(1);
+    h.drag_at(down);
+    h.run_steps(1);
+    h.drop_at(down);
+    h.run_steps(2);
+    assert!(egui_kittest::kittest::Queryable::query_by_label(&h, "0900").is_some(), "one row on");
+    assert!(egui_kittest::kittest::Queryable::query_by_label(&h, "0000").is_none());
+    h.key_press(egui::Key::End);
+    h.run_steps(2);
+    assert!(egui_kittest::kittest::Queryable::query_by_label(&h, "2900").is_some(), "End goes to the last item");
+    h.key_press(egui::Key::Enter);
+    h.run_steps(3);
+    assert_eq!(value(&h, "country"), ["2900"]);
+}
