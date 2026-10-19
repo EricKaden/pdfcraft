@@ -1222,3 +1222,26 @@ fn a_long_drop_down_list_scrolls_by_its_arrow_button_and_to_its_end() {
     h.run_steps(3);
     assert_eq!(value(&h, "country"), ["2900"]);
 }
+
+#[test]
+fn the_mouse_wheel_scrolls_a_long_drop_down_list_and_not_the_page() {
+    let mut h = harness();
+    long_country(&mut h);
+    click_field(&mut h, "country", 0);
+    let first = egui_kittest::kittest::Queryable::get_by_label(&h, "0000").rect();
+    let page = h.state().views[0].page_screen_rect(0);
+    h.hover_at(first.center() + egui::vec2(0.0, first.height() * 4.0));
+    h.run_steps(1);
+    for _ in 0..3 {
+        h.event(egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Line,
+            delta: egui::vec2(0.0, -1.0),
+            modifiers: egui::Modifiers::NONE,
+            phase: egui::TouchPhase::Move,
+        });
+        h.run_steps(2);
+    }
+    h.run_steps(6);
+    assert!(egui_kittest::kittest::Queryable::query_by_label(&h, "0000").is_none(), "the list scrolled down");
+    assert_eq!(h.state().views[0].page_screen_rect(0), page, "the page stayed where it was");
+}

@@ -769,7 +769,7 @@ fn choice_list(
         let p = ui.painter();
         p.rect_filled(outer, CornerRadius::ZERO, Color32::WHITE);
         // The wheel scrolls the list, a row at a time, and not the page under it.
-        if area.hovered() && n > shown {
+        if area.contains_pointer() && n > shown {
             st.wheel += ctx.input(|i| i.smooth_scroll_delta.y);
             ctx.input_mut(|i| i.smooth_scroll_delta = egui::Vec2::ZERO);
             let steps = (st.wheel / row).trunc();
