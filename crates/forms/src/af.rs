@@ -9,6 +9,7 @@
 //! writes them back when a form is authored. Other scripts are kept untouched and reported as
 //! unsupported; they need the JavaScript engine (M6.4).
 
+use std::collections::VecDeque;
 use std::fmt::Write as _;
 
 /// The Format tab.
@@ -545,24 +546,55 @@ fn weekday(y: i32, m: u32, d: u32) -> usize {
     (y + y / 4 - y / 100 + y / 400 + t + i64::from(d)).rem_euclid(7) as usize
 }
 
-/// The order of the year/month/day fields in a format, as letters. A run of literal digits
-/// (the fixed year in "dd.mm.26") is `'#'` with its value; the others carry 0.
-fn order(fmt: &str) -> Vec<(char, u32)> {
-    let mut out: Vec<(char, u32)> = Vec::new();
+/// One field of a date format, in the order the format has them.
+struct Part {
+    /// `'y'`, `'m'`, `'d'`, `'H'`, `'M'` or `'s'`; a run of literal digits (the fixed year in
+    /// "dd.mm.26") is `'#'`.
+    kind: char,
+    /// The value of a `'#'` run; 0 for the others.
+    literal: u32,
+    /// The digits the field takes when typed run together with the next one: 4 for "yyyy", 2 for
+    /// "yy", "mm", "dd", "HH", "MM" and "ss". 0 when the width varies ("m", "d") or the field is
+    /// a name ("mmm").
+    width: usize,
+    /// The next field follows with nothing between them ("yyyymmdd"), so one run of typed digits
+    /// can hold both.
+    joined: bool,
+}
+
+/// The fields of a format (year, month, day, hours, minutes, seconds and literal digits), in
+/// order.
+fn order(fmt: &str) -> Vec<Part> {
+    let mut out: Vec<Part> = Vec::new();
     // Weekday names (ddd, dddd) are shown, not typed: leave them out.
     let mut cleaned = fmt.replace("dddd", " ");
     cleaned = cleaned.replace("ddd", " ");
     let mut prev = ' ';
+    // The letter of the last field's current run and its length so far.
+    let mut run: Option<(char, usize)> = None;
+    let fixed = |k: char, n: usize| match (k, n) {
+        ('y', 2 | 4) | ('m' | 'd' | 'H' | 'M' | 's', 2) => n,
+        _ => 0,
+    };
     for c in cleaned.chars() {
+        let continues = run.is_some_and(|(r, _)| r == c);
+        if let Some((r, n)) = run
+            && !continues
+        {
+            // The run ended; it was the last field's width.
+            if let Some(last) = out.last_mut().filter(|p| p.kind != '#') {
+                last.width = fixed(if r == 'h' { 'H' } else { r }, n);
+            }
+            run = None;
+        }
         if let Some(digit) = c.to_digit(10) {
             match out.last_mut() {
-                Some(('#', n)) if prev.is_ascii_digit() => *n = n.saturating_mul(10).saturating_add(digit),
-                _ => out.push(('#', digit)),
+                Some(p) if p.kind == '#' && prev.is_ascii_digit() => p.literal = p.literal.saturating_mul(10).saturating_add(digit),
+                _ => out.push(Part { kind: '#', literal: digit, width: 0, joined: false }),
             }
             prev = c;
             continue;
         }
-        prev = c;
         let k = match c {
             'y' => 'y',
             'm' => 'm',
@@ -570,11 +602,28 @@ fn order(fmt: &str) -> Vec<(char, u32)> {
             'H' | 'h' => 'H',
             'M' => 'M',
             's' => 's',
-            _ => continue,
+            _ => {
+                prev = c;
+                continue;
+            }
         };
-        if out.last().map(|&(l, _)| l) != Some(k) {
-            out.push((k, 0));
+        if continues {
+            run = run.map(|(r, n)| (r, n.saturating_add(1)));
+        } else {
+            // A field starting right where the last one's letters stopped is joined to it.
+            let adjacent = matches!(prev, 'y' | 'm' | 'd' | 'H' | 'h' | 'M' | 's');
+            if out.last().map(|p| p.kind) != Some(k) {
+                if let Some(last) = out.last_mut().filter(|p| p.kind != '#') {
+                    last.joined = adjacent;
+                }
+                out.push(Part { kind: k, literal: 0, width: 0, joined: false });
+            }
+            run = Some((c, 1));
         }
+        prev = c;
+    }
+    if let (Some((r, n)), Some(last)) = (run, out.last_mut().filter(|p| p.kind != '#')) {
+        last.width = fixed(if r == 'h' { 'H' } else { r }, n);
     }
     out
 }
@@ -591,16 +640,17 @@ pub fn parse_date(text: &str, fmt: &str) -> Option<DateTime> {
     let bare_p = lower.strip_suffix('p').is_some_and(|rest| rest.trim_end().ends_with(|c: char| c.is_ascii_digit()));
     let pm = lower.contains("pm") || bare_p;
     let am = lower.contains("am");
-    // Tokens: numbers and month names.
-    let mut nums: Vec<u32> = Vec::new();
+    // Tokens: runs of digits (kept as text, so a run can be split between fields typed without
+    // separators) and month names.
+    let mut nums: VecDeque<String> = VecDeque::new();
     let mut month_name: Option<u32> = None;
     let mut cur = String::new();
-    let flush = |cur: &mut String, nums: &mut Vec<u32>, month: &mut Option<u32>| {
+    let flush = |cur: &mut String, nums: &mut VecDeque<String>, month: &mut Option<u32>| {
         if cur.is_empty() {
             return;
         }
-        if let Ok(n) = cur.parse::<u32>() {
-            nums.push(n);
+        if cur.starts_with(|c: char| c.is_ascii_digit()) {
+            nums.push_back(std::mem::take(cur));
         } else if cur.len() >= 3
             && let Some(i) = MONTHS.iter().position(|m| m.to_lowercase().starts_with(&cur.to_lowercase()))
         {
@@ -622,34 +672,48 @@ pub fn parse_date(text: &str, fmt: &str) -> Option<DateTime> {
     }
     flush(&mut cur, &mut nums, &mut month_name);
     let mut dt = DateTime { y: 0, m: 1, d: 1, hh: 0, mm: 0, ss: 0 };
-    let mut it = nums.into_iter().peekable();
+    // The next number for a field. A field joined to the next one in the format ("yyyymmdd")
+    // takes only its own width from a longer run of digits and leaves the rest for the next.
+    // `None` when there is no number left or it doesn't fit a u32.
+    let take = |nums: &mut VecDeque<String>, part: &Part| -> Option<u32> {
+        let run = nums.pop_front()?;
+        let digits = match (run.get(..part.width), run.get(part.width..)) {
+            (Some(head), Some(rest)) if part.joined && part.width > 0 && !rest.is_empty() => {
+                nums.push_front(rest.to_string());
+                head
+            }
+            _ => run.as_str(),
+        };
+        digits.parse::<u32>().ok()
+    };
     let mut have_y = false;
-    for (k, literal) in order(fmt) {
-        match k {
+    for part in order(fmt) {
+        match part.kind {
             // Literal digits in the format may be typed or left out ("15.05.26" or "15.05"
             // for "dd.mm.26"); a different number there is left over and rejected below.
-            '#' if it.peek() == Some(&literal) => {
-                it.next();
+            '#' if nums.front().and_then(|n| n.parse::<u32>().ok()) == Some(part.literal) => {
+                nums.pop_front();
             }
             'm' => {
                 dt.m = match month_name {
                     Some(m) => m,
-                    None => it.next()?,
+                    None => take(&mut nums, &part)?,
                 }
             }
-            'd' => dt.d = it.next()?,
+            'd' => dt.d = take(&mut nums, &part)?,
             'y' => {
-                let y = i32::try_from(it.next()?).ok()?;
+                let y = i32::try_from(take(&mut nums, &part)?).ok()?;
                 dt.y = if y < 100 { if y < 50 { 2000 + y } else { 1900 + y } } else { y };
                 have_y = true;
             }
-            'H' => dt.hh = it.next().unwrap_or(0),
-            'M' => dt.mm = it.next().unwrap_or(0),
-            's' => dt.ss = it.next().unwrap_or(0),
+            // Times may be left out; a number that is there must be readable.
+            'H' => dt.hh = if nums.is_empty() { 0 } else { take(&mut nums, &part)? },
+            'M' => dt.mm = if nums.is_empty() { 0 } else { take(&mut nums, &part)? },
+            's' => dt.ss = if nums.is_empty() { 0 } else { take(&mut nums, &part)? },
             _ => {}
         }
     }
-    if it.next().is_some() {
+    if !nums.is_empty() {
         return None;
     }
     if !have_y {
@@ -1307,5 +1371,53 @@ mod pm_marker_tests {
         assert_eq!(parse_date("05/09/2026 5:30p", "mm/dd/yyyy h:MM").map(|d| d.hh), Some(17));
         assert_eq!(parse_date("05/09/2026 5:30 p", "mm/dd/yyyy h:MM").map(|d| d.hh), Some(17));
         assert_eq!(parse_date("05/09/2026 5:30 pm", "mm/dd/yyyy h:MM").map(|d| d.hh), Some(17));
+    }
+}
+
+#[cfg(test)]
+mod undelimited_tests {
+    use super::*;
+
+    fn ymd(dt: Option<DateTime>) -> Option<(i32, u32, u32)> {
+        dt.map(|d| (d.y, d.m, d.d))
+    }
+
+    /// Fields written side by side in the format ("yyyymmdd", the date format of US Army forms
+    /// such as DA Form 31) take their fixed widths from one run of typed digits. Every such
+    /// date used to be refused, because the run was read as a single number.
+    #[test]
+    fn digits_typed_without_separators_fill_adjacent_fields() {
+        assert_eq!(ymd(parse_date("20261018", "yyyymmdd")), Some((2026, 10, 18)));
+        assert_eq!(ymd(parse_date("261018", "yymmdd")), Some((2026, 10, 18)));
+        assert_eq!(ymd(parse_date("10182026", "mmddyyyy")), Some((2026, 10, 18)));
+        assert_eq!(ymd(parse_date("18102026", "ddmmyyyy")), Some((2026, 10, 18)));
+        let f = Format::Date("yyyymmdd".into());
+        assert_eq!(keystroke(&f, "Todays_Date", "20261018"), Ok("20261018".into()));
+        assert_eq!(format_value(&f, "20261018"), "20261018");
+    }
+
+    #[test]
+    fn separators_are_still_accepted_in_an_undelimited_format() {
+        assert_eq!(ymd(parse_date("2026-10-18", "yyyymmdd")), Some((2026, 10, 18)));
+        assert_eq!(ymd(parse_date("2026 1018", "yyyymmdd")), Some((2026, 10, 18)));
+    }
+
+    #[test]
+    fn impossible_undelimited_dates_are_refused() {
+        let f = Format::Date("yyyymmdd".into());
+        assert!(keystroke(&f, "Todays_Date", "20261340").is_err(), "no month 13");
+        assert!(keystroke(&f, "Todays_Date", "20260230").is_err(), "no 30 February");
+        assert!(keystroke(&f, "Todays_Date", "2026101899").is_err(), "digits left over make no day");
+        assert!(keystroke(&f, "Todays_Date", "2026").is_err(), "a year alone is not a date");
+    }
+
+    /// A run of more digits than fit in a u32 ("yyyymmddHHMMss") is split, not dropped.
+    #[test]
+    fn long_runs_of_digits_split_into_dates_and_times() {
+        let dt = parse_date("20261018143005", "yyyymmddHHMMss").expect("valid date and time");
+        assert_eq!((dt.y, dt.m, dt.d, dt.hh, dt.mm, dt.ss), (2026, 10, 18, 14, 30, 5));
+        assert_eq!(parse_date("1430", "HHMM").map(|d| (d.hh, d.mm)), Some((14, 30)));
+        assert_eq!(parse_date("99999999999999999999", "yyyymmdd"), None);
+        assert_eq!(parse_date("2026 99999999999", "yyyy"), None, "an unreadable number is left over, not ignored");
     }
 }
