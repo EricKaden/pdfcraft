@@ -676,15 +676,21 @@ pub fn parse_date(text: &str, fmt: &str) -> Option<DateTime> {
     // takes only its own width from a longer run of digits and leaves the rest for the next, but
     // only when fewer runs were typed than the fields still to fill (`need`, this one included):
     // with separators each run is one field's number, so "2026-10-18" keeps its four-digit
-    // year in a yymmdd field. `None` when there is no number left or it doesn't fit a u32.
-    let next_number = |nums: &mut VecDeque<String>, part: &Part, need: usize| -> Option<u32> {
+    // year in a yymmdd field. What is left of a split run (`tail`: the front of `nums` is one)
+    // must fill its field exactly, so "202610018" leaves "018" for dd and is refused, while a
+    // number typed on its own keeps its leeway. `None` when there is no number left, it doesn't
+    // fit a u32, or such a rest has the wrong width.
+    let next_number = |nums: &mut VecDeque<String>, tail: &mut bool, part: &Part, need: usize| -> Option<u32> {
         let run = nums.pop_front()?;
+        let was_tail = std::mem::replace(tail, false);
         let short = nums.len() < need.saturating_sub(1);
         let digits = match (run.get(..part.width), run.get(part.width..)) {
             (Some(head), Some(rest)) if part.joined && part.width > 0 && short && !rest.is_empty() => {
                 nums.push_front(rest.to_string());
+                *tail = true;
                 head
             }
+            _ if was_tail && part.width > 0 && run.len() != part.width => return None,
             _ => run.as_str(),
         };
         digits.parse::<u32>().ok()
@@ -692,35 +698,37 @@ pub fn parse_date(text: &str, fmt: &str) -> Option<DateTime> {
     let parts = order(fmt);
     let takes_number = |p: &Part| matches!(p.kind, 'y' | 'd' | 'H' | 'M' | 's') || (p.kind == 'm' && month_name.is_none());
     let mut wanted = parts.iter().filter(|p| takes_number(p)).count();
+    let mut tail = false;
     let mut have_y = false;
     for part in &parts {
         let need = wanted;
         if takes_number(part) {
             wanted = wanted.saturating_sub(1);
         }
-        let take = |nums: &mut VecDeque<String>| next_number(nums, part, need);
+        let take = |nums: &mut VecDeque<String>, tail: &mut bool| next_number(nums, tail, part, need);
         match part.kind {
             // Literal digits in the format may be typed or left out ("15.05.26" or "15.05"
             // for "dd.mm.26"); a different number there is left over and rejected below.
             '#' if nums.front().and_then(|n| n.parse::<u32>().ok()) == Some(part.literal) => {
                 nums.pop_front();
+                tail = false;
             }
             'm' => {
                 dt.m = match month_name {
                     Some(m) => m,
-                    None => take(&mut nums)?,
+                    None => take(&mut nums, &mut tail)?,
                 }
             }
-            'd' => dt.d = take(&mut nums)?,
+            'd' => dt.d = take(&mut nums, &mut tail)?,
             'y' => {
-                let y = i32::try_from(take(&mut nums)?).ok()?;
+                let y = i32::try_from(take(&mut nums, &mut tail)?).ok()?;
                 dt.y = if y < 100 { if y < 50 { 2000 + y } else { 1900 + y } } else { y };
                 have_y = true;
             }
             // Times may be left out; a number that is there must be readable.
-            'H' => dt.hh = if nums.is_empty() { 0 } else { take(&mut nums)? },
-            'M' => dt.mm = if nums.is_empty() { 0 } else { take(&mut nums)? },
-            's' => dt.ss = if nums.is_empty() { 0 } else { take(&mut nums)? },
+            'H' => dt.hh = if nums.is_empty() { 0 } else { take(&mut nums, &mut tail)? },
+            'M' => dt.mm = if nums.is_empty() { 0 } else { take(&mut nums, &mut tail)? },
+            's' => dt.ss = if nums.is_empty() { 0 } else { take(&mut nums, &mut tail)? },
             _ => {}
         }
     }
@@ -1431,6 +1439,18 @@ mod undelimited_tests {
         assert!(keystroke(&f, "Todays_Date", "20260230").is_err(), "no 30 February");
         assert!(keystroke(&f, "Todays_Date", "2026101899").is_err(), "digits left over make no day");
         assert!(keystroke(&f, "Todays_Date", "2026").is_err(), "a year alone is not a date");
+    }
+
+    /// What is left of a split run fills its field exactly: "202610018" leaves "018" for the
+    /// day, one digit too many, and used to pass as 18 October. Numbers typed on their own
+    /// keep their leeway.
+    #[test]
+    fn the_rest_of_a_split_run_must_fill_its_field_exactly() {
+        assert_eq!(parse_date("202610018", "yyyymmdd"), None, "one digit too many");
+        assert_eq!(parse_date("2026101", "yyyymmdd"), None, "one digit too few");
+        assert_eq!(parse_date("2026101814305", "yyyymmddHHMM"), None, "one digit too many in the time");
+        assert_eq!(ymd(parse_date("2026 10 018", "yyyymmdd")), Some((2026, 10, 18)), "typed on its own, 018 is still a day");
+        assert_eq!(parse_date("202610181430", "yyyymmddHHMM").map(|d| (d.d, d.hh, d.mm)), Some((18, 14, 30)));
     }
 
     /// A run of more digits than fit in a u32 ("yyyymmddHHMMss") is split, not dropped.
