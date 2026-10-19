@@ -1245,3 +1245,45 @@ fn the_mouse_wheel_scrolls_a_long_drop_down_list_and_not_the_page() {
     assert!(egui_kittest::kittest::Queryable::query_by_label(&h, "0000").is_none(), "the list scrolled down");
     assert_eq!(h.state().views[0].page_screen_rect(0), page, "the page stayed where it was");
 }
+
+#[test]
+fn each_arrow_key_press_moves_a_drop_downs_list_one_item() {
+    let mut h = harness();
+    long_country(&mut h);
+    click_field(&mut h, "country", 0);
+    h.key_press(egui::Key::Home);
+    h.run_steps(2);
+    h.key_press(egui::Key::ArrowDown);
+    h.run_steps(2);
+    h.key_press(egui::Key::Enter);
+    h.run_steps(3);
+    assert_eq!(value(&h, "country"), ["0100"], "one item down from the first");
+}
+
+#[test]
+fn an_open_drop_down_keeps_the_arrow_keys_and_home_from_moving_the_page() {
+    let mut h = harness();
+    long_country(&mut h);
+    // A page taller than the window, so the keys would scroll it.
+    h.state_mut().set_option("zoom", "300").unwrap();
+    for _ in 0..30 {
+        h.run_steps(2);
+        if !h.state().render_pending() {
+            break;
+        }
+    }
+    click_field(&mut h, "country", 0);
+    // The pointer rests on the list, as it does after reaching for it.
+    let row = egui_kittest::kittest::Queryable::get_by_label(&h, "0300").rect();
+    h.hover_at(row.center());
+    h.run_steps(2);
+    let page = h.state().views[0].page_screen_rect(0);
+    h.key_press(egui::Key::Home);
+    h.run_steps(2);
+    h.key_press(egui::Key::ArrowDown);
+    h.run_steps(4);
+    assert_eq!(h.state().views[0].page_screen_rect(0), page, "the page stayed where it was");
+    h.key_press(egui::Key::Enter);
+    h.run_steps(3);
+    assert_eq!(value(&h, "country"), ["0100"], "one item down from the first");
+}
