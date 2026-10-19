@@ -673,12 +673,15 @@ pub fn parse_date(text: &str, fmt: &str) -> Option<DateTime> {
     flush(&mut cur, &mut nums, &mut month_name);
     let mut dt = DateTime { y: 0, m: 1, d: 1, hh: 0, mm: 0, ss: 0 };
     // The next number for a field. A field joined to the next one in the format ("yyyymmdd")
-    // takes only its own width from a longer run of digits and leaves the rest for the next.
-    // `None` when there is no number left or it doesn't fit a u32.
-    let take = |nums: &mut VecDeque<String>, part: &Part| -> Option<u32> {
+    // takes only its own width from a longer run of digits and leaves the rest for the next, but
+    // only when fewer runs were typed than the fields still to fill (`need`, this one included):
+    // with separators each run is one field's number, so "2026-10-18" keeps its four-digit
+    // year in a yymmdd field. `None` when there is no number left or it doesn't fit a u32.
+    let next_number = |nums: &mut VecDeque<String>, part: &Part, need: usize| -> Option<u32> {
         let run = nums.pop_front()?;
+        let short = nums.len() < need.saturating_sub(1);
         let digits = match (run.get(..part.width), run.get(part.width..)) {
-            (Some(head), Some(rest)) if part.joined && part.width > 0 && !rest.is_empty() => {
+            (Some(head), Some(rest)) if part.joined && part.width > 0 && short && !rest.is_empty() => {
                 nums.push_front(rest.to_string());
                 head
             }
@@ -686,8 +689,16 @@ pub fn parse_date(text: &str, fmt: &str) -> Option<DateTime> {
         };
         digits.parse::<u32>().ok()
     };
+    let parts = order(fmt);
+    let takes_number = |p: &Part| matches!(p.kind, 'y' | 'd' | 'H' | 'M' | 's') || (p.kind == 'm' && month_name.is_none());
+    let mut wanted = parts.iter().filter(|p| takes_number(p)).count();
     let mut have_y = false;
-    for part in order(fmt) {
+    for part in &parts {
+        let need = wanted;
+        if takes_number(part) {
+            wanted = wanted.saturating_sub(1);
+        }
+        let take = |nums: &mut VecDeque<String>| next_number(nums, part, need);
         match part.kind {
             // Literal digits in the format may be typed or left out ("15.05.26" or "15.05"
             // for "dd.mm.26"); a different number there is left over and rejected below.
@@ -697,19 +708,19 @@ pub fn parse_date(text: &str, fmt: &str) -> Option<DateTime> {
             'm' => {
                 dt.m = match month_name {
                     Some(m) => m,
-                    None => take(&mut nums, &part)?,
+                    None => take(&mut nums)?,
                 }
             }
-            'd' => dt.d = take(&mut nums, &part)?,
+            'd' => dt.d = take(&mut nums)?,
             'y' => {
-                let y = i32::try_from(take(&mut nums, &part)?).ok()?;
+                let y = i32::try_from(take(&mut nums)?).ok()?;
                 dt.y = if y < 100 { if y < 50 { 2000 + y } else { 1900 + y } } else { y };
                 have_y = true;
             }
             // Times may be left out; a number that is there must be readable.
-            'H' => dt.hh = if nums.is_empty() { 0 } else { take(&mut nums, &part)? },
-            'M' => dt.mm = if nums.is_empty() { 0 } else { take(&mut nums, &part)? },
-            's' => dt.ss = if nums.is_empty() { 0 } else { take(&mut nums, &part)? },
+            'H' => dt.hh = if nums.is_empty() { 0 } else { take(&mut nums)? },
+            'M' => dt.mm = if nums.is_empty() { 0 } else { take(&mut nums)? },
+            's' => dt.ss = if nums.is_empty() { 0 } else { take(&mut nums)? },
             _ => {}
         }
     }
@@ -1400,6 +1411,17 @@ mod undelimited_tests {
     fn separators_are_still_accepted_in_an_undelimited_format() {
         assert_eq!(ymd(parse_date("2026-10-18", "yyyymmdd")), Some((2026, 10, 18)));
         assert_eq!(ymd(parse_date("2026 1018", "yyyymmdd")), Some((2026, 10, 18)));
+    }
+
+    /// Separators mean one number per field, as before: a four-digit year typed with them stays
+    /// whole in a two-digit-year format. Only a run covering several fields is split.
+    #[test]
+    fn a_run_is_split_only_when_it_has_to_fill_several_fields() {
+        assert_eq!(ymd(parse_date("2026-10-18", "yymmdd")), Some((2026, 10, 18)));
+        assert_eq!(ymd(parse_date("2026-10", "yymm")), Some((2026, 10, 1)));
+        assert_eq!(ymd(parse_date("2610", "yymm")), Some((2026, 10, 1)));
+        assert_eq!(ymd(parse_date("202610 18", "yyyymmdd")), Some((2026, 10, 18)));
+        assert_eq!(ymd(parse_date("18Oct2026", "ddmmmyyyy")), Some((2026, 10, 18)));
     }
 
     #[test]
