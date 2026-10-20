@@ -114,10 +114,6 @@ fn assemble(objs: Vec<Vec<u8>>) -> Vec<u8> {
     out
 }
 
-/// A scripted form (JavaScript events): `qty` (initialised to 2, validated ≤ 100) × `price`
-/// (5) = `total` (calculated); a check box `more` that shows the hidden `details` subform;
-/// a table whose `row` (item, amount) repeats, with `addRow`, `removeRow` and `hello` buttons;
-/// `grand`, the calculated sum of the amounts.
 /// A form with `layout:ready` scripts: the root subform turns field highlighting on (as forms
 /// do with `app.runtimeHighlight`), `stamp` takes a value, `seen` records the highlight its script
 /// reads after the root's, and `pageNo` numbers its page (left to the layout). `note` has a
@@ -142,6 +138,10 @@ pub fn layout_ready_template() -> String {
     .to_string()
 }
 
+/// A scripted form (JavaScript events): `qty` (initialised to 2, validated ≤ 100) × `price`
+/// (5) = `total` (calculated); a check box `more` that shows the hidden `details` subform;
+/// a table whose `row` (item, amount) repeats, with `addRow`, `removeRow` and `hello` buttons;
+/// `grand`, the calculated sum of the amounts.
 pub fn scripted_template() -> String {
     r##"<?xml version="1.0" encoding="UTF-8"?>
 <xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/">
