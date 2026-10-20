@@ -1121,6 +1121,12 @@ fn a_form_button_opens_its_attached_instructions_in_a_new_tab() {
     h.state_mut().run_button_script(id, "go", "this.exportDataObject({cName: 'Guide.pdf', nLaunch: 2});");
     h.run_steps(4);
     assert_eq!(tabs(&h), ["form.pdf", "inner.pdf"], "the attached PDF opens in its own tab");
+    // Asked again from the form, it goes back to that tab rather than opening another.
+    h.state_mut().active = Some(0);
+    h.state_mut().run_button_script(id, "go", "this.exportDataObject({cName: 'Guide.pdf', nLaunch: 2});");
+    h.run_steps(4);
+    assert_eq!(tabs(&h), ["form.pdf", "inner.pdf"], "no second copy");
+    assert_eq!(h.state().active, Some(1), "its tab is shown");
     // A file the document doesn't have is said so.
     h.state_mut().run_button_script(id, "go", "this.exportDataObject({cName: 'nope.pdf', nLaunch: 2});");
     h.run_steps(2);
