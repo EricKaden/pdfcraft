@@ -608,8 +608,8 @@ fn parse_node(c: XmlNode, warnings: &mut Vec<String>, depth: usize) -> Option<No
     })
 }
 
-/// Whether a `layout:ready` script numbers pages (`xfa.layout.page(this)`, `pageCount()`), which
-/// the layout does itself.
+/// Whether a `layout:ready` script uses page numbers (`xfa.layout.page(this)`, `pageCount()`): on a
+/// field, it makes the field one the layout numbers itself.
 pub fn numbers_pages(script: &str) -> bool {
     script.contains("pageCount") || script.contains("layout.page(") || script.contains("layout.absPage(")
 }

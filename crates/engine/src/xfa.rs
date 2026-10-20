@@ -5,7 +5,7 @@
 //! presence and access changes become overrides kept in the PDF, added or removed rows change
 //! the datasets, and any of those lays the form out again.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use pdfcraft_js::xfa::{XfaDoc, XfaEffect, XfaEvent, XfaKind, XfaNode};
@@ -154,6 +154,14 @@ fn to_js(n: &FormNode) -> XfaNode {
     }
 }
 
+/// Whether the live form has a field at `som`.
+fn is_field(n: &FormNode, som: &str, depth: usize) -> bool {
+    if depth > 64 {
+        return false;
+    }
+    (n.som == som && n.kind == Some(NodeKind::Field)) || n.children.iter().any(|c| is_field(c, som, depth + 1))
+}
+
 fn find_container<'a>(n: &'a FormNode, som: &str, depth: usize) -> Option<&'a FormNode> {
     if depth > 64 {
         return None;
@@ -270,9 +278,14 @@ struct Runner<'a, 'b> {
     /// rebuilt when the structure changed).
     session: Option<XfaSession>,
     changes: Changes,
+    /// Fields the layout numbers (a field whose own layout:ready script puts a page number in
+    /// it): while layout:ready scripts run, a value written to one is dropped, so each page keeps
+    /// the number the layout gave it.
+    numbered: HashSet<String>,
 }
 
 impl<'a, 'b> Runner<'a, 'b> {
+    /// A runner for one event on `doc` and its template, its scripts sharing `budget_ms`.
     fn new(doc: &'a mut pdfcraft_cos::Document, tpl: &'a Template, run: &'a mut XfaRun<'b>, budget_ms: u64) -> Self {
         let data = pdfcraft_xfa::data_of(doc);
         let ov = pdfcraft_xfa::overrides(doc);
@@ -298,6 +311,7 @@ impl<'a, 'b> Runner<'a, 'b> {
             cached: None,
             session: None,
             changes: Changes::default(),
+            numbered: HashSet::new(),
         }
     }
 
@@ -587,7 +601,9 @@ impl<'a, 'b> Runner<'a, 'b> {
             }
             match e {
                 XfaEffect::SetValue { som, value } => {
-                    self.set_value(som, value);
+                    if !self.numbered.contains(som) {
+                        self.set_value(som, value);
+                    }
                 }
                 XfaEffect::SetPresence { som, presence } => {
                     if self.ov.presence.insert(som.clone(), presence.clone()).as_ref() != Some(presence) {
@@ -777,19 +793,27 @@ fn collect_fields(n: &FormNode, out: &mut Vec<(String, String, String, String)>,
 /// calculations. Returns what they changed.
 ///
 /// layout:ready runs once here, where forms set themselves up (turning field highlighting on,
-/// say); a viewer runs it after every layout. Scripts that number pages are left out: the
-/// layout gives each page its number itself.
+/// say); a viewer runs it after every layout. Every layout:ready script runs, but a field that
+/// numbers pages keeps the number the layout gave each page: the value a script writes to it is
+/// dropped (one value would put the same number on every page).
 pub(crate) fn on_open(doc: &mut pdfcraft_cos::Document, tpl: &Template, run: &mut XfaRun) -> Result<Changes, String> {
     let mut r = Runner::new(doc, tpl, run, OPEN_BUDGET_MS);
     let events: Vec<ScriptEvent> = r.live().events.iter().filter(|e| e.activity == "initialize" || e.activity == "docReady").cloned().collect();
     for ev in &events {
         r.run(ev, "")?;
     }
-    let ready: Vec<ScriptEvent> =
-        r.live().events.iter().filter(|e| e.activity == "layoutReady" && !pdfcraft_xfa::numbers_pages(&e.script)).cloned().collect();
+    let (ready, numbered) = {
+        let live = r.live();
+        let ready: Vec<ScriptEvent> = live.events.iter().filter(|e| e.activity == "layoutReady").cloned().collect();
+        let numbered: HashSet<String> =
+            ready.iter().filter(|e| pdfcraft_xfa::numbers_pages(&e.script) && is_field(&live.root, &e.som, 0)).map(|e| e.som.clone()).collect();
+        (ready, numbered)
+    };
+    r.numbered = numbered;
     for ev in &ready {
         r.run(ev, "")?;
     }
+    r.numbered.clear();
     r.calculates()?;
     r.finish()
 }
