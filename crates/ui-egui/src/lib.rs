@@ -1380,6 +1380,9 @@ impl PdfCraftApp {
         if activate {
             let out = self.session.take_js_output(id);
             self.handle_js(id, out);
+        } else if let Some(on) = self.session.take_js_highlight(id) {
+            // The field highlight a form asks for isn't about the current document: now.
+            self.script_highlight(id, on);
         }
         Ok(id)
     }

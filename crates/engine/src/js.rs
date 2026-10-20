@@ -194,6 +194,21 @@ impl Session {
         self.docs.iter_mut().find(|d| d.id == id).map(|d| std::mem::take(&mut d.js_output)).unwrap_or_default()
     }
 
+    /// The last field-highlight change (`app.runtimeHighlight`) scripts asked for in document
+    /// `id`, taken out of its waiting output; the rest stays for [`Session::take_js_output`].
+    pub fn take_js_highlight(&mut self, id: DocId) -> Option<bool> {
+        let doc = self.docs.iter_mut().find(|d| d.id == id)?;
+        let mut last = None;
+        doc.js_output.requests.retain(|r| match r {
+            Request::Highlight(on) => {
+                last = Some(*on);
+                false
+            }
+            _ => true,
+        });
+        last
+    }
+
     /// Run `script` in document `id`, for a button (`target`: the field, event "Mouse Up") or
     /// the console (no target). Field changes and `resetForm` are applied as one undoable step;
     /// everything else the script asked for is returned.
