@@ -84,7 +84,9 @@ impl PdfCraftApp {
         let keyed = |a: &pdfcraft_render::Attachment| matches!(&a.source, pdfcraft_render::AttachmentSource::Document { key } if key == name);
         let index = doc.info.attachments.iter().position(keyed).or_else(|| doc.info.attachments.iter().position(|a| a.name == name));
         let Some(i) = index else {
-            self.notify_fmt("The form asks for the attached file {name}, which this document doesn't have.", &[("name", name)]);
+            // The name is the form's own text: shortened, as file names are elsewhere.
+            let shown = crate::dialogs::shorten_middle(name, 80);
+            self.notify_fmt("The form asks for the attached file {name}, which this document doesn't have.", &[("name", &shown)]);
             return;
         };
         let pdf = doc.info.attachments.get(i).is_some_and(|a| a.name.to_ascii_lowercase().ends_with(".pdf"));
