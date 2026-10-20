@@ -6132,35 +6132,58 @@ fn a_forms_layout_ready_scripts_run_once_it_is_laid_out() {
 /// it on, and `seen`'s, which runs after it, records what it reads.
 #[test]
 fn a_later_field_script_reads_the_highlight_an_earlier_one_set() {
-    let text = |name: &str, y: u32, aa: &str| {
-        format!("<< /Type /Annot /Subtype /Widget /FT /Tx /T ({name}) /Rect [20 {y} 180 {}] /P 3 0 R /F 4 {aa} >>", y + 20)
+    // Fields `input` (no script), then those named in `calculated` with their calculate scripts,
+    // calculated in that order.
+    let form = |calculated: &[(&str, &str)]| {
+        let text = |name: &str, y: usize, aa: &str| {
+            format!("<< /Type /Annot /Subtype /Widget /FT /Tx /T ({name}) /Rect [20 {y} 180 {}] /P 3 0 R /F 4 {aa} >>", y + 20)
+        };
+        let n = calculated.len();
+        let refs = |from: usize| (from..from + n).map(|i| format!("{i} 0 R")).collect::<Vec<_>>().join(" ");
+        let mut objs = vec![
+            format!(
+                "<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [4 0 R {}] /CO [{}] /DA (/Helv 0 Tf 0 g) /DR << /Font << /Helv {} 0 R >> >> >> >>",
+                refs(5),
+                refs(5),
+                5 + n
+            ),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 200 300] >>".to_string(),
+            format!("<< /Type /Page /Parent 2 0 R /Annots [4 0 R {}] >>", refs(5)),
+            text("input", 250, ""),
+        ];
+        for (i, (name, js)) in calculated.iter().enumerate() {
+            objs.push(text(name, 220 - 30 * i, &format!("/AA << /C << /S /JavaScript /JS ({js}) >> >>")));
+        }
+        objs.push("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".to_string());
+        let mut out = b"%PDF-1.7\n".to_vec();
+        let mut offsets = Vec::new();
+        for (i, o) in objs.iter().enumerate() {
+            offsets.push(out.len());
+            out.extend_from_slice(format!("{} 0 obj\n{o}\nendobj\n", i + 1).as_bytes());
+        }
+        let xref = out.len();
+        out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+        for o in offsets {
+            out.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+        }
+        out.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
+        Arc::new(out)
     };
-    let objs = [
-        "<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [4 0 R 5 0 R 6 0 R] /CO [5 0 R 6 0 R] /DA (/Helv 0 Tf 0 g) /DR << /Font << /Helv 7 0 R >> >> >> >>".to_string(),
-        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 200 300] >>".to_string(),
-        "<< /Type /Page /Parent 2 0 R /Annots [4 0 R 5 0 R 6 0 R] >>".to_string(),
-        text("input", 250, ""),
-        text("on", 220, "/AA << /C << /S /JavaScript /JS (app.runtimeHighlight = true; event.value = 'set';) >> >>"),
-        text("seen", 190, "/AA << /C << /S /JavaScript /JS (event.value = String\\(app.runtimeHighlight\\);) >> >>"),
-        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".to_string(),
-    ];
-    let mut out = b"%PDF-1.7\n".to_vec();
-    let mut offsets = Vec::new();
-    for (i, o) in objs.iter().enumerate() {
-        offsets.push(out.len());
-        out.extend_from_slice(format!("{} 0 obj\n{o}\nendobj\n", i + 1).as_bytes());
-    }
-    let xref = out.len();
-    out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
-    for o in offsets {
-        out.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
-    }
-    out.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
+    let seen = ("seen", "event.value = String\\(app.runtimeHighlight\\);");
+    let value = |s: &Session, id: DocId, n: &str| s.get(id).unwrap().form.iter().find(|f| f.name == n).unwrap().value.clone();
+    // `on`'s calculation turns it on, and `seen`'s, which runs after it, records what it reads.
     let mut s = Session::new();
-    let id = s.open("seen.pdf", None, Arc::new(out), None).unwrap();
-    let value = |s: &Session, n: &str| s.get(id).unwrap().form.iter().find(|f| f.name == n).unwrap().value.clone();
+    let id = s.open("seen.pdf", None, form(&[("on", "app.runtimeHighlight = true; event.value = 'set';"), seen]), None).unwrap();
     s.apply(id, Edit::SetFieldValue { name: "input".into(), value: FieldValue::Text("1".into()) }).unwrap();
-    assert_eq!(value(&s, "on"), ["set"]);
-    assert_eq!(value(&s, "seen"), ["true"], "the later calculation reads the new setting");
+    assert_eq!(value(&s, id, "on"), ["set"]);
+    assert_eq!(value(&s, id, "seen"), ["true"], "the later calculation reads the new setting");
     assert!(s.take_js_output(id).requests.contains(&js::Request::Highlight(true)));
+    // A button's script that turns it off and changes a field: the calculations it sets off read
+    // the new setting too.
+    let mut s = Session::new();
+    s.set_field_highlight(true);
+    let id = s.open("seen.pdf", None, form(&[seen]), None).unwrap();
+    let o = s.run_javascript(id, "app.runtimeHighlight = false; getField('input').value = '2';", Some("input")).unwrap();
+    assert_eq!(o.requests, [js::Request::Highlight(false)]);
+    assert_eq!(value(&s, id, "seen"), ["false"], "the button's own change reaches the calculations");
 }

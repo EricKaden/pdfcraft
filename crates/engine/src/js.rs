@@ -124,6 +124,14 @@ impl JsRunner {
     }
 }
 
+/// The field highlight the last of `requests` that sets it asks for (`app.runtimeHighlight`).
+fn last_highlight(requests: &[Request]) -> Option<bool> {
+    requests.iter().rev().find_map(|r| match r {
+        Request::Highlight(on) => Some(*on),
+        _ => None,
+    })
+}
+
 /// The Info dictionary as `this.info` keys (lower-case).
 fn info(cos: &pdfcraft_cos::Document) -> Vec<(String, String)> {
     let Some(d) = cos.trailer().get(b"Info").map(|i| cos.resolve(i)).and_then(|i| i.as_dict().cloned()) else { return Vec::new() };
@@ -136,16 +144,15 @@ fn info(cos: &pdfcraft_cos::Document) -> Vec<(String, String)> {
 }
 
 impl Scripts for JsRunner {
+    /// Run a field's `event` script on `target` with the fields as they are, keeping what it
+    /// printed or asked for; a failing script leaves the value as it was.
     fn run(&mut self, event: FieldEvent, script: &str, target: &Field, value: &str, fields: &[Field]) -> ScriptResult {
         let states: Vec<_> = fields.iter().map(|f| field_state(&self.cos, f)).collect();
         let ev = pdfcraft_js::Event::field(event.name(), &target.name, value);
         let o = pdfcraft_js::run(script, &ev, &self.doc, &states, &self.doc_scripts, Limits::default());
         self.output.absorb(&o);
         // The edit's later scripts read the field highlight this one set.
-        if let Some(on) = o.requests.iter().rev().find_map(|r| match r {
-            Request::Highlight(on) => Some(*on),
-            _ => None,
-        }) {
+        if let Some(on) = last_highlight(&o.requests) {
             self.doc.highlight = on;
         }
         if o.error.is_some() {
@@ -261,6 +268,10 @@ impl Session {
             })
             .collect();
         o.requests.retain(|r| !matches!(r, Request::Reset(_)));
+        // The calculations the script's changes set off read the field highlight it asked for.
+        if let Some(on) = last_highlight(&o.requests) {
+            self.field_highlight = on;
+        }
         let mut edits = Vec::new();
         if !changes.is_empty() {
             edits.push(Edit::ApplyScriptChanges { changes });
