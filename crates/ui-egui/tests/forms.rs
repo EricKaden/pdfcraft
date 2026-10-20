@@ -1273,3 +1273,19 @@ fn an_open_drop_down_keeps_the_arrow_keys_and_home_from_moving_the_page() {
     h.run_steps(3);
     assert_eq!(value(&h, "country"), ["0100"], "one item down from the first");
 }
+
+#[test]
+fn a_pointer_resting_on_a_list_the_keys_scroll_keeps_the_highlight_on_the_keys() {
+    let mut h = harness();
+    long_country(&mut h);
+    click_field(&mut h, "country", 0);
+    let row = egui_kittest::kittest::Queryable::get_by_label(&h, "0300").rect();
+    h.hover_at(row.center());
+    h.run_steps(2);
+    // End scrolls the list, so another item comes under the resting pointer.
+    h.key_press(egui::Key::End);
+    h.run_steps(2);
+    h.key_press(egui::Key::Enter);
+    h.run_steps(3);
+    assert_eq!(value(&h, "country"), ["2900"], "the item End went to, not the one under the pointer");
+}

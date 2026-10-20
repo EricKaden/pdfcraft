@@ -53,9 +53,10 @@ pub struct ChoiceList {
     pub grab: Option<f32>,
     /// Wheel movement not yet a whole row.
     pub wheel: f32,
-    /// The item the pointer was last over: entering another makes that one current, so a
-    /// resting pointer doesn't take the highlight back from the arrow keys.
-    pub pointer_on: Option<usize>,
+    /// Where the pointer was last frame: only a pointer that moves makes the item under it
+    /// current, so a resting one keeps no claim on the highlight when the keys scroll the list
+    /// beneath it.
+    pub pointer_at: Option<egui::Pos2>,
     /// Set on the first frame, from the field's value.
     pub placed: bool,
 }
@@ -778,7 +779,8 @@ fn choice_list(
                 st.first = (st.first as f32 - steps).clamp(0.0, max_first as f32) as usize;
             }
         }
-        let mut pointer_on = None;
+        let pointer = ctx.input(|i| i.pointer.hover_pos());
+        let pointer_moved = pointer != st.pointer_at;
         let font = egui::FontId::proportional(size);
         for k in 0..shown {
             let i = st.first + k;
@@ -786,11 +788,8 @@ fn choice_list(
             let r = Rect::from_min_size(outer.min + vec2(1.0, 1.0 + k as f32 * row), vec2(width - 2.0 - bar, row));
             let item = ui.interact(r, ui.id().with(("choice", i)), egui::Sense::click());
             item.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, st.current == Some(i), display));
-            if item.hovered() {
-                pointer_on = Some(i);
-                if st.pointer_on != Some(i) {
-                    st.current = Some(i);
-                }
+            if item.hovered() && pointer_moved {
+                st.current = Some(i);
             }
             if item.clicked() {
                 chosen = Some(i);
@@ -808,7 +807,7 @@ fn choice_list(
             };
             p.with_clip_rect(r).galley(egui::pos2(x, r.center().y - galley.size().y / 2.0), galley, Color32::BLACK);
         }
-        st.pointer_on = pointer_on;
+        st.pointer_at = pointer;
         if bar > 0.0 {
             scroll_bar(ui, Rect::from_min_max(egui::pos2(outer.max.x - 1.0 - bar, outer.min.y + 1.0), outer.max - vec2(1.0, 1.0)), shown, n, st);
         }
