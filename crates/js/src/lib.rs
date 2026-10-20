@@ -911,6 +911,8 @@ fn color_object(ctx: &mut Context) -> JsObject {
     o.build()
 }
 
+/// The AcroForm object model as globals: the document's methods and properties (`getField`,
+/// `numPages`, `info`, …), `app`, `util`, `console`, `display` and `color`.
 fn install(ctx: &mut Context) -> JsResult<()> {
     let globals: [(&str, usize, NativeFunction); 9] = [
         ("getField", 1, NativeFunction::from_fn_ptr(get_field)),

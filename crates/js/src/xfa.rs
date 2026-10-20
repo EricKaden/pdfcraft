@@ -1118,6 +1118,8 @@ fn xfa_resolve(ctx: &mut Context, many: bool) -> JsResult<JsValue> {
     resolver(ctx, current, many)
 }
 
+/// The XFA object model as globals for one script: `xfa` (form, host, layout, event), `event`
+/// (the same object as `xfa.event`), `this` as node `current`, `app`, `console` and `util`.
 fn install(ctx: &mut Context, event: &XfaEvent, doc: &XfaDoc, current: usize) -> JsResult<()> {
     let rw = Attribute::CONFIGURABLE;
     let form = node_object(ctx, 0)?;

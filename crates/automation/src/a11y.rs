@@ -646,6 +646,7 @@ impl Automation {
     }
 }
 
+/// A script's request as `js_run` reports it: one small object per kind of request.
 fn request_json(r: &pdfcraft_engine::js::Request) -> Value {
     use pdfcraft_engine::js::Request as R;
     match r {

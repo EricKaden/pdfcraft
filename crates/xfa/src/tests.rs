@@ -2068,6 +2068,8 @@ fn som_indices_count_earlier_same_named_siblings() {
     assert_eq!((0..=children.len()).map(|i| sibs.at(i)).collect::<Vec<_>>(), [0, 0, 1, 0, 2, 1, 0]);
 }
 
+/// `ready` is two events: `ref="$layout"` is layout:ready (`layoutReady`), anything else stays
+/// form:ready (`ready`), in the template and in the live form; page numbering is recognized.
 #[test]
 fn a_layout_ready_event_is_told_apart_from_form_ready() {
     let (tpl, _) = parse(&crate::fixtures::layout_ready_template()).unwrap();

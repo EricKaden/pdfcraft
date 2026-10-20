@@ -2265,6 +2265,8 @@ struct EditCtx {
 }
 
 impl EditCtx {
+    /// The context for one edit: `now` (the session's clock) dates it, and with `salt` seeds the
+    /// ids it makes.
     fn new(now: Option<i64>, salt: u64) -> Self {
         let mut seed = 0x9E37_79B9_7F4A_7C15u64 ^ salt;
         if let Some(t) = now {
@@ -3375,6 +3377,8 @@ impl Session {
         Ok(self.commit_open(prepared))
     }
 
+    /// What [`OpenContext::prepare_open`] runs inside its panic guard: read, decrypt and lay out
+    /// the document, and run an XFA form's opening scripts.
     fn prepare_open_unguarded(
         context: &OpenContext,
         name: String,

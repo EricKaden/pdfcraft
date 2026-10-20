@@ -1150,6 +1150,8 @@ impl PdfCraftApp {
         self.try_open(name, path, std::sync::Arc::new(bytes), None, activate)
     }
 
+    /// Hand `request` to the background open worker (started on first use); the result arrives
+    /// later as a pending open, under the returned token.
     #[cfg(not(target_arch = "wasm32"))]
     fn schedule_open(&mut self, request: OpenRequest) -> Result<u64, String> {
         if self.open_worker.is_none() {
@@ -1275,6 +1277,8 @@ impl PdfCraftApp {
         }
     }
 
+    /// Open `bytes` on this thread: ask for a password if the document needs one, else add it
+    /// as a tab (in front when `activate`).
     fn try_open(
         &mut self,
         name: &str,
@@ -1312,6 +1316,8 @@ impl PdfCraftApp {
         self.finish_open(name, path, bytes.len(), prepared, activate).map(|_| ())
     }
 
+    /// Add a prepared document as a tab: its view, the recent-files entry, and what its scripts
+    /// said while it opened (at once in front, or when a background tab is first selected).
     fn finish_open(
         &mut self,
         name: &str,
@@ -3123,6 +3129,7 @@ impl eframe::App for PdfCraftApp {
         self.process_picked();
     }
 
+    /// One frame of the whole window.
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         i18n::set_current(i18n::Lang::from_pref(&self.language));

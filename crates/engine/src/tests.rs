@@ -6107,6 +6107,9 @@ fn undo_never_makes_an_unsaved_document_clean() {
     assert!(!s.get(new).unwrap().dirty, "once saved, undo back to the saved state is clean");
 }
 
+/// layout:ready scripts run once on opening: the root's turns field highlighting on (only when it
+/// is off), a field's sets a value and a later script reads the new highlight, while page
+/// numbering is left to the layout and form:ready is another event.
 #[test]
 fn a_forms_layout_ready_scripts_run_once_it_is_laid_out() {
     let bytes = Arc::new(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::layout_ready_template()));
