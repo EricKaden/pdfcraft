@@ -6127,3 +6127,40 @@ fn a_forms_layout_ready_scripts_run_once_it_is_laid_out() {
     let id = s.open("ready.pdf", None, bytes, None).expect("opens");
     assert!(s.take_js_output(id).requests.is_empty());
 }
+
+/// Field scripts of one edit read the field highlight an earlier one set: `on`'s calculation turns
+/// it on, and `seen`'s, which runs after it, records what it reads.
+#[test]
+fn a_later_field_script_reads_the_highlight_an_earlier_one_set() {
+    let text = |name: &str, y: u32, aa: &str| {
+        format!("<< /Type /Annot /Subtype /Widget /FT /Tx /T ({name}) /Rect [20 {y} 180 {}] /P 3 0 R /F 4 {aa} >>", y + 20)
+    };
+    let objs = [
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [4 0 R 5 0 R 6 0 R] /CO [5 0 R 6 0 R] /DA (/Helv 0 Tf 0 g) /DR << /Font << /Helv 7 0 R >> >> >> >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 200 300] >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /Annots [4 0 R 5 0 R 6 0 R] >>".to_string(),
+        text("input", 250, ""),
+        text("on", 220, "/AA << /C << /S /JavaScript /JS (app.runtimeHighlight = true; event.value = 'set';) >> >>"),
+        text("seen", 190, "/AA << /C << /S /JavaScript /JS (event.value = String\\(app.runtimeHighlight\\);) >> >>"),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".to_string(),
+    ];
+    let mut out = b"%PDF-1.7\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, o) in objs.iter().enumerate() {
+        offsets.push(out.len());
+        out.extend_from_slice(format!("{} 0 obj\n{o}\nendobj\n", i + 1).as_bytes());
+    }
+    let xref = out.len();
+    out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+    for o in offsets {
+        out.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    out.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
+    let mut s = Session::new();
+    let id = s.open("seen.pdf", None, Arc::new(out), None).unwrap();
+    let value = |s: &Session, n: &str| s.get(id).unwrap().form.iter().find(|f| f.name == n).unwrap().value.clone();
+    s.apply(id, Edit::SetFieldValue { name: "input".into(), value: FieldValue::Text("1".into()) }).unwrap();
+    assert_eq!(value(&s, "on"), ["set"]);
+    assert_eq!(value(&s, "seen"), ["true"], "the later calculation reads the new setting");
+    assert!(s.take_js_output(id).requests.contains(&js::Request::Highlight(true)));
+}

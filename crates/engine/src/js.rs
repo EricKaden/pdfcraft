@@ -141,6 +141,13 @@ impl Scripts for JsRunner {
         let ev = pdfcraft_js::Event::field(event.name(), &target.name, value);
         let o = pdfcraft_js::run(script, &ev, &self.doc, &states, &self.doc_scripts, Limits::default());
         self.output.absorb(&o);
+        // The edit's later scripts read the field highlight this one set.
+        if let Some(on) = o.requests.iter().rev().find_map(|r| match r {
+            Request::Highlight(on) => Some(*on),
+            _ => None,
+        }) {
+            self.doc.highlight = on;
+        }
         if o.error.is_some() {
             // As in Acrobat, a failing script leaves the value alone (the error goes to the console).
             return ScriptResult { rc: true, value: value.to_string(), changes: Vec::new(), message: None };
@@ -178,6 +185,7 @@ impl Session {
         self.js_off = !on;
     }
 
+    /// Whether JavaScript is on (Preferences ▸ JavaScript ▸ Enable Acrobat JavaScript).
     pub fn javascript(&self) -> bool {
         !self.js_off
     }
