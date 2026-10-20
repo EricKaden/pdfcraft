@@ -1103,6 +1103,8 @@ fn guide_fixture() -> Vec<u8> {
     out
 }
 
+/// A button script's `exportDataObject` opens the attached PDF in a new tab, goes back to that
+/// tab when asked again, and names a missing file in a toast, a long name shortened.
 #[test]
 fn a_form_button_opens_its_attached_instructions_in_a_new_tab() {
     let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(|_cc| {

@@ -6107,6 +6107,8 @@ fn undo_never_makes_an_unsaved_document_clean() {
     assert!(!s.get(new).unwrap().dirty, "once saved, undo back to the saved state is clean");
 }
 
+/// In an XFA form a button's click script may open an attached file; the same request from a
+/// text field's exit script is noted in the console and not made.
 #[test]
 fn an_xfa_button_may_open_an_attached_file_and_other_events_may_not() {
     let xdp = r##"<?xml version="1.0" encoding="UTF-8"?>

@@ -920,6 +920,8 @@ fn color_object(ctx: &mut Context) -> JsObject {
     o.build()
 }
 
+/// Register the document's methods and properties (`getField`, `exportDataObject`, `numPages`,
+/// `pageNum`, …) as globals, and the `app`, `util`, `console`, `display` and `color` objects.
 fn install(ctx: &mut Context) -> JsResult<()> {
     let globals: [(&str, usize, NativeFunction); 10] = [
         ("getField", 1, NativeFunction::from_fn_ptr(get_field)),

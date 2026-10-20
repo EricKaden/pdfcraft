@@ -1137,6 +1137,8 @@ mod data_objects {
     use super::*;
     use crate::xfa::{XfaDoc, XfaEffect, XfaEvent, run_xfa};
 
+    /// `exportDataObject`, as a document method or a bare global, asks to open the named attached
+    /// file when `nLaunch` is 1 or 2 and to save it otherwise; without `cName` it is an error.
     #[test]
     fn export_data_object_asks_to_open_or_save_an_attached_file() {
         let o = go(
@@ -1158,6 +1160,8 @@ mod data_objects {
         assert!(o.requests.is_empty());
     }
 
+    /// In an XFA script `event.target` is the document, so `exportDataObject` works on it, while
+    /// `xfa.event.target` is still the node the event happened on.
     #[test]
     fn in_xfa_scripts_event_target_is_the_document_and_xfa_event_target_the_node() {
         let event = XfaEvent { activity: "click".into(), target: "form1[0].page1[0].go[0]".into(), ..Default::default() };

@@ -26,6 +26,8 @@ impl JsOutput {
         self.alerts.is_empty() && self.console.is_empty() && self.requests.is_empty() && self.errors.is_empty()
     }
 
+    /// Keep a field script's alerts, console lines, requests and error. A request to open or save
+    /// an attached file is dropped with a note in the console: only a button may make one.
     fn absorb(&mut self, o: &Outcome) {
         self.alerts.extend(o.alerts.iter().cloned());
         self.console.extend(o.console.iter().cloned());
