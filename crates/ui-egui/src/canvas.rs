@@ -343,6 +343,87 @@ pub(crate) fn signature_badges(signatures: &[pdfcraft_engine::SignatureInfo], pa
         .collect()
 }
 
+/// The empty signature fields on one page that get a sign tab, as their widget rectangles
+/// (user space). Each is unsigned and visible, on this page, with a rectangle that passes the
+/// same screen-space guard as [`signature_badges`]. A click must also be able to sign it, as
+/// in `forms_ui::page_input`: the document allows filling (`can_fill`), and the form field of
+/// that name is a signature field that isn't read-only, with a shown widget at that place.
+pub(crate) fn sign_tabs(
+    signatures: &[pdfcraft_engine::SignatureInfo],
+    form: &[pdfcraft_engine::FormField],
+    page: usize,
+    can_fill: bool,
+) -> Vec<[f64; 4]> {
+    let mut empty = signatures
+        .iter()
+        .filter(|s| can_fill && !s.signed && s.visible && s.page == Some(page))
+        .filter_map(|s| s.rect.filter(|r| r.iter().all(|v| v.is_finite() && v.abs() < f32::MAX as f64)).map(|r| (s.field.as_str(), r)))
+        .peekable();
+    if empty.peek().is_none() {
+        return Vec::new();
+    }
+    // The widgets a click signs, by field name and exact rectangle, from one pass over the form:
+    // a file with thousands of fields costs no more per frame than the field hit test does.
+    let signable: HashSet<(&str, [u64; 4])> = form
+        .iter()
+        .filter(|f| f.kind == pdfcraft_engine::FormFieldKind::Signature && !f.read_only())
+        .flat_map(|f| f.widgets.iter().filter(|w| w.page == Some(page) && !w.hidden).map(move |w| (f.name.as_str(), w.rect.map(f64::to_bits))))
+        .collect();
+    empty.filter(|(name, r)| signable.contains(&(*name, r.map(f64::to_bits)))).map(|(_, r)| r).collect()
+}
+
+/// Height of a sign tab, in points.
+const SIGN_TAB_HEIGHT: f32 = 18.0;
+/// Size of the signature icon on a sign tab.
+const SIGN_TAB_ICON: f32 = 12.0;
+/// Gap between a sign tab and its field's edges.
+const SIGN_TAB_INSET: f32 = 3.0;
+/// Room left and right of a sign tab's contents, and between its icon and label.
+const SIGN_TAB_PAD: f32 = 5.0;
+
+/// Where one sign tab is drawn on screen: its chip, the icon's square and, when the label fits,
+/// the point where the label starts (its left edge, on the chip's center line).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct SignTab {
+    pub rect: Rect,
+    pub icon: Rect,
+    pub label: Option<Pos2>,
+}
+
+/// Lays out a sign tab inside the top-left corner of `field` (the widget on screen) for a label
+/// `label_width` points wide. The tab takes at most half the field's width: it drops the label
+/// when only the icon fits, and is left out on a field too small (or not finite) for even that.
+pub(crate) fn sign_tab_layout(field: Rect, label_width: f32) -> Option<SignTab> {
+    if !field.is_finite() || field.height() < SIGN_TAB_HEIGHT + 2.0 * SIGN_TAB_INSET {
+        return None;
+    }
+    let room = field.width() / 2.0 - SIGN_TAB_INSET;
+    let full = SIGN_TAB_PAD + SIGN_TAB_ICON + SIGN_TAB_PAD + label_width + SIGN_TAB_PAD;
+    let with_label = label_width.is_finite() && label_width > 0.0 && full <= room;
+    let width = if with_label { full } else { SIGN_TAB_HEIGHT };
+    if width > room {
+        return None;
+    }
+    let rect = Rect::from_min_size(field.min + vec2(SIGN_TAB_INSET, SIGN_TAB_INSET), vec2(width, SIGN_TAB_HEIGHT));
+    let icon_x = if with_label { rect.left() + SIGN_TAB_PAD } else { rect.center().x - SIGN_TAB_ICON / 2.0 };
+    let icon = Rect::from_min_size(pos2(icon_x, rect.center().y - SIGN_TAB_ICON / 2.0), Vec2::splat(SIGN_TAB_ICON));
+    let label = with_label.then(|| pos2(icon.right() + SIGN_TAB_PAD, rect.center().y));
+    Some(SignTab { rect, icon, label })
+}
+
+/// Paints the sign tab of an empty signature field whose widget is at `field` on screen: an
+/// accent chip with the signature icon and "Sign" in white, as the app's primary buttons are.
+/// Screen-only chrome, like the validation badges.
+fn paint_sign_tab(ui: &egui::Ui, painter: &egui::Painter, field: Rect, t: &Tokens) {
+    let galley = ui.fonts_mut(|f| f.layout_no_wrap(tl!("Sign").to_string(), theme::semibold(11.0), Color32::WHITE));
+    let Some(tab) = sign_tab_layout(field, galley.size().x) else { return };
+    painter.rect_filled(tab.rect, CornerRadius::same(4), t.accent);
+    icons::paint(ui, tab.icon, "signature", SIGN_TAB_ICON, Color32::WHITE);
+    if let Some(at) = tab.label {
+        painter.galley(at - vec2(0.0, galley.size().y / 2.0), galley, Color32::WHITE);
+    }
+}
+
 /// The name shown for a document tab, the window title and the Combine picker.
 /// A snapshot reads like its source document, plus the snapshot suffix that tells
 /// the tabs apart. Without a title the file name (which already carries the suffix)
@@ -2354,8 +2435,8 @@ const SUPPRESS_SECS: f64 = 0.25;
 /// Short rolling extension while egui still has an unprocessed wheel tail.
 const SUPPRESS_TAIL_SECS: f64 = 0.05;
 
-// The viewer moves between docking and the central panel as modes change; keep its scroll
-// identity tied to the document instead of either parent UI.
+/// The viewer moves between docking and the central panel as modes change; keep its scroll
+/// identity tied to the document instead of either parent UI.
 fn page_scroll<R>(
     ui: &mut egui::Ui,
     scroll: egui::ScrollArea,
@@ -2365,6 +2446,8 @@ fn page_scroll<R>(
     ui.scope_builder(egui::UiBuilder::new().id(id), |ui| scroll.show_viewport(ui, draw)).inner
 }
 
+/// The document area of view `index`: its pages with their overlays and viewer chrome (form
+/// fields, comments, signature badges and sign tabs), and the page input of the active tool.
 pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     let t = Tokens::get(ui.ctx());
     // Keyboard scrolling applies to this frame's page view only, never later.
@@ -3548,6 +3631,14 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
                     ui.ctx().request_repaint();
                 } else {
                     view.flash = None;
+                }
+            }
+            // An empty field a click would sign carries a small tab saying so, shown only while
+            // a click on the field signs it (the Select tool, not while preparing a form). Like
+            // the validation badges, it never enters the file, exports or printing.
+            if tool == QuickTool::Select && !preparing {
+                for [x0, y0, x1, y1] in sign_tabs(&doc.signatures, &form, i, can_fill) {
+                    paint_sign_tab(ui, painter, xf.user_rect(info, i, [x0 as f32, y0 as f32, x1 as f32, y1 as f32]), &t);
                 }
             }
             // Validation is viewer chrome over the signer's original artwork, which
@@ -5312,6 +5403,258 @@ fn grayscale(mut img: egui::ColorImage) -> egui::ColorImage {
         *c = Color32::from_rgba_premultiplied(gray, gray, gray, a);
     }
     img
+}
+
+#[cfg(test)]
+mod sign_tab_tests {
+    use super::*;
+    use pdfcraft_engine::{FormField, FormFieldKind, FormWidget, SignatureInfo};
+
+    /// The widget rectangle the unit tests use (user space).
+    const RECT: [f64; 4] = [20.0, 110.0, 140.0, 180.0];
+
+    /// An unsigned, visible signature listing for field `name` with its widget on `page` at
+    /// `rect`. Each test changes the one thing it is about.
+    fn listing(name: &str, page: usize, rect: [f64; 4]) -> SignatureInfo {
+        SignatureInfo {
+            field: name.into(),
+            signed: false,
+            page: Some(page),
+            rect: Some(rect),
+            visible: true,
+            signer: None,
+            certificate: None,
+            chain: Vec::new(),
+            date: None,
+            signing_time: None,
+            reason: None,
+            location: None,
+            contact: None,
+            sub_filter: None,
+            doc_timestamp: false,
+            certify: None,
+            revision: 1,
+            signed_len: 0,
+            digest: None,
+            algorithm: None,
+            timestamp: false,
+            timestamp_time: None,
+            status: pdfcraft_engine::SignatureStatus::Unknown,
+            modification: pdfcraft_engine::sign::Modification::None,
+            details: Vec::new(),
+        }
+    }
+
+    /// The signature form field `name` with one shown widget on `page` at `rect`.
+    fn field(name: &str, page: usize, rect: [f64; 4]) -> FormField {
+        FormField {
+            name: name.into(),
+            obj: pdfcraft_cos::ObjRef::new(4, 0),
+            kind: FormFieldKind::Signature,
+            value: Vec::new(),
+            default: Vec::new(),
+            flags: 0,
+            max_len: None,
+            options: Vec::new(),
+            da: String::new(),
+            quadding: 0,
+            tooltip: None,
+            widgets: vec![FormWidget {
+                obj: pdfcraft_cos::ObjRef::new(4, 0),
+                page: Some(page),
+                rect,
+                on_state: None,
+                state: None,
+                tab: 0,
+                locked: false,
+                hidden: false,
+                rotation: 0,
+                caption: None,
+                list: None,
+            }],
+            actions: Default::default(),
+            button: None,
+        }
+    }
+
+    /// The cases (by name) whose single listing and form still got a tab on page 0.
+    fn tabbed<'a>(cases: &[(&'a str, SignatureInfo, Vec<FormField>, bool)]) -> Vec<&'a str> {
+        cases.iter().filter(|(_, s, form, can_fill)| !sign_tabs(std::slice::from_ref(s), form, 0, *can_fill).is_empty()).map(|c| c.0).collect()
+    }
+
+    /// An empty, visible signature field that a click signs gets one tab, at its widget, on its
+    /// own page only.
+    #[test]
+    fn sign_tabs_mark_an_empty_field_that_a_click_signs() {
+        let tabs = sign_tabs(&[listing("Approver", 0, RECT)], &[field("Approver", 0, RECT)], 0, true);
+        assert_eq!(tabs, vec![RECT]);
+        let later = [listing("Witness", 1, RECT)];
+        assert_eq!(sign_tabs(&later, &[field("Witness", 1, RECT)], 1, true), vec![RECT]);
+        assert!(sign_tabs(&later, &[field("Witness", 1, RECT)], 0, true).is_empty(), "not on the page before");
+    }
+
+    /// Signed, invisible, other-page and unplaced fields get no tab. Each case is checked on its
+    /// own, so a failure names every case that wrongly got one.
+    #[test]
+    fn sign_tabs_skip_signed_invisible_other_page_and_unplaced_fields() {
+        let form = || vec![field("Approver", 0, RECT)];
+        let cases = [
+            ("signed", SignatureInfo { signed: true, ..listing("Approver", 0, RECT) }, form(), true),
+            ("invisible", SignatureInfo { visible: false, ..listing("Approver", 0, RECT) }, form(), true),
+            ("on another page", listing("Approver", 1, RECT), vec![field("Approver", 1, RECT)], true),
+            ("on no page", SignatureInfo { page: None, ..listing("Approver", 0, RECT) }, form(), true),
+            ("without a rectangle", SignatureInfo { rect: None, ..listing("Approver", 0, RECT) }, form(), true),
+        ];
+        assert_eq!(tabbed(&cases), Vec::<&str>::new());
+    }
+
+    /// NaN, infinite and gigantic rectangles never reach the painter, even when the form's
+    /// widget carries the same numbers.
+    #[test]
+    fn sign_tabs_skip_rectangles_that_cannot_reach_the_screen() {
+        let hostile = |name: &'static str, rect: [f64; 4]| (name, listing("Approver", 0, rect), vec![field("Approver", 0, rect)], true);
+        let cases = [
+            hostile("NaN", [f64::NAN, 110.0, 140.0, 180.0]),
+            hostile("infinite", [20.0, f64::INFINITY, 140.0, 180.0]),
+            hostile("minus infinite", [20.0, 110.0, f64::NEG_INFINITY, 180.0]),
+            hostile("huge", [20.0, 110.0, 1e300, 180.0]),
+        ];
+        assert_eq!(tabbed(&cases), Vec::<&str>::new());
+    }
+
+    /// Fields a click would not sign get no tab: a read-only field, a document that refuses
+    /// filling, a listing with no form field of its name, a field of another kind of that name,
+    /// and a widget that is hidden or elsewhere.
+    #[test]
+    fn sign_tabs_skip_fields_that_a_click_cannot_sign() {
+        let empty = || listing("Approver", 0, RECT);
+        let with = |change: fn(&mut FormField)| {
+            let mut f = field("Approver", 0, RECT);
+            change(&mut f);
+            vec![f]
+        };
+        let cases = [
+            ("read-only", empty(), with(|f| f.flags = pdfcraft_engine::field_flags::READ_ONLY), true),
+            ("filling refused", empty(), with(|_| {}), false),
+            ("no form field", empty(), Vec::new(), true),
+            ("another kind", empty(), with(|f| f.kind = FormFieldKind::Text), true),
+            ("hidden widget", empty(), with(|f| f.widgets.iter_mut().for_each(|w| w.hidden = true)), true),
+            ("widget elsewhere", empty(), with(|f| f.widgets.iter_mut().for_each(|w| w.rect = [160.0, 110.0, 280.0, 180.0])), true),
+        ];
+        assert_eq!(tabbed(&cases), Vec::<&str>::new());
+    }
+
+    /// A roomy field gets the whole tab inside its top-left corner: the icon, then the label,
+    /// on no more than half the field's width.
+    #[test]
+    fn sign_tab_layout_puts_icon_and_label_in_the_top_left_corner() {
+        let field = Rect::from_min_size(pos2(100.0, 200.0), vec2(400.0, 120.0));
+        let tab = sign_tab_layout(field, 30.0).expect("fits");
+        assert_eq!(tab.rect.min, field.min + vec2(SIGN_TAB_INSET, SIGN_TAB_INSET));
+        assert_eq!(tab.rect.height(), SIGN_TAB_HEIGHT);
+        assert!(field.contains_rect(tab.rect) && tab.rect.width() <= field.width() / 2.0, "{tab:?}");
+        assert!(tab.rect.contains_rect(tab.icon), "{tab:?}");
+        let at = tab.label.expect("the label fits");
+        assert!(at.x >= tab.icon.right() && at.x + 30.0 <= tab.rect.right(), "{tab:?}");
+        assert_eq!(at.y, tab.rect.center().y);
+    }
+
+    /// A field with room for the icon but not the label gets the icon alone, and one too small
+    /// for even that, or with a rectangle that isn't finite, gets no tab. A label that can't be
+    /// measured is left out instead of drawn at a NaN position.
+    #[test]
+    fn sign_tab_layout_drops_the_label_then_the_tab_on_small_fields() {
+        let narrow = Rect::from_min_size(Pos2::ZERO, vec2(60.0, 40.0));
+        let icon_only = sign_tab_layout(narrow, 30.0).expect("the icon fits");
+        assert_eq!(icon_only.label, None);
+        assert!(narrow.contains_rect(icon_only.rect) && icon_only.rect.contains_rect(icon_only.icon), "{icon_only:?}");
+        let cases = [
+            ("too short", Rect::from_min_size(Pos2::ZERO, vec2(400.0, 20.0))),
+            ("too narrow", Rect::from_min_size(Pos2::ZERO, vec2(30.0, 40.0))),
+            ("infinite", Rect::from_min_max(Pos2::ZERO, pos2(f32::INFINITY, 40.0))),
+            ("NaN", Rect::from_min_max(pos2(f32::NAN, 0.0), pos2(400.0, 40.0))),
+        ];
+        let laid_out: Vec<&str> = cases.iter().filter(|(_, r)| sign_tab_layout(*r, 30.0).is_some()).map(|c| c.0).collect();
+        assert_eq!(laid_out, Vec::<&str>::new());
+        let roomy = Rect::from_min_size(Pos2::ZERO, vec2(400.0, 120.0));
+        assert_eq!(sign_tab_layout(roomy, f32::NAN).map(|t| t.label), Some(None));
+    }
+
+    /// One page with three signature fields: Approver is empty, Witness is signed (a signature
+    /// dictionary as its value is enough to list it as signed) and Locked is empty but read-only.
+    const SIGN_FIELDS: &[u8] = b"%PDF-1.7
+1 0 obj << /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [4 0 R 5 0 R 6 0 R] >> >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Annots [4 0 R 5 0 R 6 0 R] >> endobj
+4 0 obj << /Type /Annot /Subtype /Widget /FT /Sig /T (Approver) /Rect [20 110 140 180] /P 3 0 R /F 4 >> endobj
+5 0 obj << /Type /Annot /Subtype /Widget /FT /Sig /T (Witness) /V << /Type /Sig >> /Rect [160 110 280 180] /P 3 0 R /F 4 >> endobj
+6 0 obj << /Type /Annot /Subtype /Widget /FT /Sig /T (Locked) /Ff 1 /Rect [20 20 140 90] /P 3 0 R /F 4 >> endobj
+trailer << /Root 1 0 R >>
+%%EOF";
+
+    /// Every shape painted in the last frame, with nested lists flattened.
+    fn painted(h: &egui_kittest::Harness<'static, PdfCraftApp>) -> Vec<egui::Shape> {
+        let mut stack: Vec<egui::Shape> = h.output().shapes.iter().map(|c| c.shape.clone()).collect();
+        let mut out = Vec::new();
+        while let Some(shape) = stack.pop() {
+            match shape {
+                egui::Shape::Vec(inner) => stack.extend(inner),
+                shape => out.push(shape),
+            }
+        }
+        out
+    }
+
+    /// Where the named field's first widget is on screen.
+    fn field_on_screen(h: &egui_kittest::Harness<'static, PdfCraftApp>, name: &str) -> Rect {
+        let app = h.state();
+        let view = &app.views[0];
+        let doc = app.session.get(view.id).expect("open");
+        let f = doc.form.iter().find(|f| f.name == name).expect("field");
+        crate::forms_ui::field_screen_rect(view, &doc.info, f, 0).expect("on screen")
+    }
+
+    /// In the real shell, an empty signature field shows its accent tab with "Sign" in its
+    /// top-left corner, and the signed and read-only fields show none. The tab is part of the
+    /// field: hovering it shows the pointing hand, and clicking it starts signing that field.
+    #[test]
+    fn empty_signature_fields_show_a_sign_tab_that_signs_them() {
+        let mut h = egui_kittest::Harness::builder().with_size(vec2(1400.0, 900.0)).build_eframe(|_cc| {
+            let mut app = PdfCraftApp::new();
+            app.set_option("language", "en").unwrap();
+            app.open_bytes("sign-fields.pdf", None, SIGN_FIELDS.to_vec()).unwrap();
+            app.set_option("left", "closed").unwrap();
+            app.set_option("panel", "none").unwrap();
+            app
+        });
+        h.run_steps(6);
+        let accent = Tokens::get(&h.ctx).accent;
+        let shapes = painted(&h);
+        let chips: Vec<Rect> = shapes
+            .iter()
+            .filter_map(|s| match s {
+                egui::Shape::Rect(r) if r.fill == accent => Some(r.rect),
+                _ => None,
+            })
+            .collect();
+        let (approver, witness, locked) = (field_on_screen(&h, "Approver"), field_on_screen(&h, "Witness"), field_on_screen(&h, "Locked"));
+        let tab = chips.iter().copied().find(|c| approver.contains_rect(*c)).unwrap_or_else(|| panic!("no tab in {approver:?}: {chips:?}"));
+        assert!(tab.min.x - approver.min.x < 8.0 && tab.min.y - approver.min.y < 8.0, "in the top-left corner: {tab:?} in {approver:?}");
+        let label = shapes.iter().any(|s| matches!(s, egui::Shape::Text(t) if t.galley.text() == "Sign" && tab.contains(t.pos)));
+        assert!(label, "the tab says Sign");
+        assert!(!chips.iter().any(|c| witness.intersects(*c)), "a signed field has no tab: {chips:?}");
+        assert!(!chips.iter().any(|c| locked.intersects(*c)), "a read-only field has no tab: {chips:?}");
+
+        h.hover_at(tab.center());
+        h.run_steps(1);
+        assert_eq!(h.output().platform_output.cursor_icon, egui::CursorIcon::PointingHand);
+        h.drag_at(tab.center());
+        h.run_steps(1);
+        h.drop_at(tab.center());
+        h.run_steps(3);
+        assert_eq!(h.state().dialog, Some(crate::Dialog::Sign));
+        assert_eq!(h.state().sign_draft.as_ref().and_then(|d| d.field.clone()).as_deref(), Some("Approver"));
+    }
 }
 
 #[cfg(test)]
