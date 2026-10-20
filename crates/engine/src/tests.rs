@@ -6116,6 +6116,7 @@ fn a_forms_layout_ready_scripts_run_once_it_is_laid_out() {
     let out = s.take_js_output(id);
     assert_eq!(out.requests, vec![js::Request::Highlight(true)], "the form turns field highlighting on: {out:?}");
     assert_eq!(value(&s, "stamp"), vec!["laid out".to_string()]);
+    assert_eq!(value(&s, "seen"), vec!["true".to_string()], "a later script reads the highlight the root's turned on");
     assert!(value(&s, "pageNo").iter().all(|v| v.is_empty()), "page numbers are the layout's: {:?}", value(&s, "pageNo"));
     assert!(value(&s, "note").iter().all(|v| v.is_empty()), "form:ready is another event");
     // With highlighting already on, the form has nothing to ask for.

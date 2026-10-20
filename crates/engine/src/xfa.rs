@@ -636,6 +636,9 @@ impl<'a, 'b> Runner<'a, 'b> {
                 XfaEffect::Beep => self.run.out.requests.push(Request::Beep),
                 XfaEffect::Highlight(on) => {
                     self.run.highlight = *on;
+                    // The session's scripts read the setting it started with: the next script
+                    // gets a session that reads the new one.
+                    self.session = None;
                     self.run.out.requests.push(Request::Highlight(*on));
                 }
                 XfaEffect::Recalculate => {}

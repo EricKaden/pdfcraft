@@ -119,8 +119,9 @@ fn assemble(objs: Vec<Vec<u8>>) -> Vec<u8> {
 /// a table whose `row` (item, amount) repeats, with `addRow`, `removeRow` and `hello` buttons;
 /// `grand`, the calculated sum of the amounts.
 /// A form with `layout:ready` scripts: the root subform turns field highlighting on (as forms
-/// do with `app.runtimeHighlight`), `stamp` takes a value, and `pageNo` numbers its page (left to
-/// the layout). `note` has a `form:ready` script, a different event.
+/// do with `app.runtimeHighlight`), `stamp` takes a value, `seen` records the highlight its script
+/// reads after the root's, and `pageNo` numbers its page (left to the layout). `note` has a
+/// `form:ready` script, a different event.
 pub fn layout_ready_template() -> String {
     r##"<?xml version="1.0" encoding="UTF-8"?>
 <xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/">
@@ -130,6 +131,7 @@ pub fn layout_ready_template() -> String {
  <pageSet><pageArea name="front"><contentArea x="0.5in" y="0.5in" w="7.5in" h="10in"/><medium short="8.5in" long="11in"/></pageArea></pageSet>
  <subform name="page" layout="tb">
   <field name="stamp" w="2in" h="0.3in"><ui><textEdit/></ui><event activity="ready" ref="$layout"><script contentType="application/x-javascript">this.rawValue = "laid out";</script></event></field>
+  <field name="seen" w="2in" h="0.3in"><ui><textEdit/></ui><event activity="ready" ref="$layout"><script contentType="application/x-javascript">this.rawValue = String(app.runtimeHighlight);</script></event></field>
   <field name="pageNo" w="1in" h="0.3in"><ui><textEdit/></ui><event activity="ready" ref="$layout"><script contentType="application/x-javascript">this.rawValue = xfa.layout.page(this);</script></event></field>
   <field name="note" w="2in" h="0.3in"><ui><textEdit/></ui><event activity="ready" ref="$form"><script contentType="application/x-javascript">this.rawValue = "form ready";</script></event></field>
  </subform>
