@@ -6106,3 +6106,20 @@ fn undo_never_makes_an_unsaved_document_clean() {
     s.undo(new).unwrap();
     assert!(!s.get(new).unwrap().dirty, "once saved, undo back to the saved state is clean");
 }
+
+#[test]
+fn a_forms_layout_ready_scripts_run_once_it_is_laid_out() {
+    let bytes = Arc::new(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::layout_ready_template()));
+    let mut s = Session::new();
+    let id = s.open("ready.pdf", None, bytes.clone(), None).expect("opens");
+    let value = |s: &Session, n: &str| s.get(id).unwrap().form.iter().find(|f| f.name == n).map(|f| f.value.clone()).unwrap_or_default();
+    let out = s.take_js_output(id);
+    assert_eq!(out.requests, vec![js::Request::Highlight(true)], "the form turns field highlighting on: {out:?}");
+    assert_eq!(value(&s, "stamp"), vec!["laid out".to_string()]);
+    assert!(value(&s, "pageNo").iter().all(|v| v.is_empty()), "page numbers are the layout's: {:?}", value(&s, "pageNo"));
+    assert!(value(&s, "note").iter().all(|v| v.is_empty()), "form:ready is another event");
+    // With highlighting already on, the form has nothing to ask for.
+    s.set_field_highlight(true);
+    let id = s.open("ready.pdf", None, bytes, None).expect("opens");
+    assert!(s.take_js_output(id).requests.is_empty());
+}

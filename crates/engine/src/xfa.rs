@@ -127,6 +127,8 @@ pub(crate) struct XfaRun<'a> {
     pub datasets: Option<pdfcraft_cos::ObjRef>,
     /// A script ran past its time limit and was abandoned: the form's scripts should stay off.
     pub ran_away: bool,
+    /// Whether the viewer highlights form fields, for `app.runtimeHighlight`.
+    pub highlight: bool,
 }
 
 fn to_js(n: &FormNode) -> XfaNode {
@@ -307,7 +309,7 @@ impl<'a, 'b> Runner<'a, 'b> {
 
     /// The script engine for this event.
     fn session(&mut self) -> &mut XfaSession {
-        let doc_info = XfaDoc { file_name: String::new(), page: 0, page_count: self.run.page_count };
+        let doc_info = XfaDoc { file_name: String::new(), page: 0, page_count: self.run.page_count, highlight: self.run.highlight };
         self.session.get_or_insert_with(|| XfaSession::new(doc_info))
     }
 
@@ -632,6 +634,10 @@ impl<'a, 'b> Runner<'a, 'b> {
                     }
                 }
                 XfaEffect::Beep => self.run.out.requests.push(Request::Beep),
+                XfaEffect::Highlight(on) => {
+                    self.run.highlight = *on;
+                    self.run.out.requests.push(Request::Highlight(*on));
+                }
                 XfaEffect::Recalculate => {}
                 XfaEffect::Relayout => relayout = true,
             }
@@ -764,11 +770,21 @@ fn collect_fields(n: &FormNode, out: &mut Vec<(String, String, String, String)>,
     }
 }
 
-/// On open: initialize scripts, then calculations. Returns what they changed.
+/// On open: initialize scripts, then layout:ready scripts (the form is laid out by now), then
+/// calculations. Returns what they changed.
+///
+/// layout:ready runs once here, where forms set themselves up (turning field highlighting on,
+/// say); a viewer runs it after every layout. Scripts that number pages are left out: the
+/// layout gives each page its number itself.
 pub(crate) fn on_open(doc: &mut pdfcraft_cos::Document, tpl: &Template, run: &mut XfaRun) -> Result<Changes, String> {
     let mut r = Runner::new(doc, tpl, run, OPEN_BUDGET_MS);
     let events: Vec<ScriptEvent> = r.live().events.iter().filter(|e| e.activity == "initialize" || e.activity == "docReady").cloned().collect();
     for ev in &events {
+        r.run(ev, "")?;
+    }
+    let ready: Vec<ScriptEvent> =
+        r.live().events.iter().filter(|e| e.activity == "layoutReady" && !pdfcraft_xfa::numbers_pages(&e.script)).cloned().collect();
+    for ev in &ready {
         r.run(ev, "")?;
     }
     r.calculates()?;

@@ -67,6 +67,14 @@ impl PdfCraftApp {
                     &[("u", &u)],
                 ),
                 Request::SaveAs => self.run_command("file.save_as"),
+                // As the Highlight fields button does: this document and the next ones.
+                Request::Highlight(on) => {
+                    if let Some(i) = view {
+                        self.views[i].highlight_fields = on;
+                    }
+                    self.view_defaults.highlight_fields = on;
+                    self.session.set_field_highlight(on);
+                }
                 Request::Focus(_) | Request::Beep | Request::Reset(_) => {}
             }
         }

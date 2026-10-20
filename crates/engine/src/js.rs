@@ -111,8 +111,15 @@ pub struct JsRunner {
 }
 
 impl JsRunner {
-    pub fn new(cos: &pdfcraft_cos::Document, file_name: &str) -> JsRunner {
-        let doc = pdfcraft_js::DocInfo { file_name: file_name.to_string(), num_pages: pdfcraft_model::pages(cos).len(), page: 0, info: info(cos) };
+    /// `highlight`: whether the viewer highlights form fields (`app.runtimeHighlight`).
+    pub fn new(cos: &pdfcraft_cos::Document, file_name: &str, highlight: bool) -> JsRunner {
+        let doc = pdfcraft_js::DocInfo {
+            file_name: file_name.to_string(),
+            num_pages: pdfcraft_model::pages(cos).len(),
+            page: 0,
+            info: info(cos),
+            highlight,
+        };
         JsRunner { doc, doc_scripts: pdfcraft_forms::document_scripts(cos), output: JsOutput::default(), cos: cos.clone() }
     }
 }
@@ -175,6 +182,13 @@ impl Session {
         !self.js_off
     }
 
+    /// Whether the viewer highlights form fields (Highlight fields), which forms' scripts read as
+    /// `app.runtimeHighlight`. A script that changes it asks for [`Request::Highlight`]; the
+    /// viewer then calls this with the new setting.
+    pub fn set_field_highlight(&mut self, on: bool) {
+        self.field_highlight = on;
+    }
+
     /// What scripts printed or asked for since the last call (alerts, console, print, …).
     pub fn take_js_output(&mut self, id: DocId) -> JsOutput {
         self.docs.iter_mut().find(|d| d.id == id).map(|d| std::mem::take(&mut d.js_output)).unwrap_or_default()
@@ -205,7 +219,7 @@ impl Session {
                 ..Default::default()
             });
         }
-        let runner = JsRunner::new(&cos, &doc.name);
+        let runner = JsRunner::new(&cos, &doc.name, self.field_highlight);
         let fields = pdfcraft_forms::fields(&cos);
         let states: Vec<_> = fields.iter().map(|f| field_state(&cos, f)).collect();
         let event = match target {

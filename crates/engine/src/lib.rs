@@ -2252,6 +2252,8 @@ struct EditCtx {
     xfa_removed: Vec<String>,
     /// Pages in the document, for `xfa.layout.pageCount()`.
     pages: usize,
+    /// Whether the viewer highlights form fields, for `app.runtimeHighlight`.
+    highlight: bool,
     date: Option<String>,
     /// Today in local time, for date tokens.
     today: (i64, u32, u32),
@@ -2281,6 +2283,7 @@ impl EditCtx {
             xfa_ran_away: false,
             xfa_removed: Vec::new(),
             pages: 0,
+            highlight: false,
             date: now.map(pdfcraft_cos::pdf_date),
             today: (1970, 1, 1),
             seed,
@@ -2438,7 +2441,8 @@ fn run_edit(doc: &mut pdfcraft_cos::Document, edit: &Edit, cx: &mut EditCtx) -> 
         },
         Edit::XfaEvent { som, activity } => {
             let tpl = cx.xfa.clone().ok_or_else(|| EditError::Invalid("this is not a laid-out XFA form, or JavaScript is off".into()))?;
-            let mut run = xfa::XfaRun { page_count: cx.pages, out: &mut cx.xfa_out, datasets: cx.xfa_datasets, ran_away: false };
+            let mut run =
+                xfa::XfaRun { page_count: cx.pages, out: &mut cx.xfa_out, datasets: cx.xfa_datasets, ran_away: false, highlight: cx.highlight };
             let ran = xfa::on_event(doc, &tpl, som, activity, &mut run);
             cx.xfa_datasets = run.datasets;
             cx.xfa_ran_away |= run.ran_away;
@@ -2935,6 +2939,9 @@ pub struct Session {
     date_format: Option<String>,
     /// Preferences ▸ Date format ▸ Language, when not following the interface language.
     date_language: Option<String>,
+    /// Highlight fields, as the viewer shows it: what forms' scripts read as
+    /// `app.runtimeHighlight` (off by default, as in a session without a viewer).
+    field_highlight: bool,
 }
 
 /// Immutable session state needed while a document is prepared away from its owning thread.
@@ -2943,6 +2950,7 @@ pub struct OpenContext {
     now: Option<i64>,
     js_off: bool,
     trust: Arc<TrustStore>,
+    highlight: bool,
 }
 
 /// A fully prepared document that has not yet been registered in a session.
@@ -3177,7 +3185,7 @@ fn image_content_type(bytes: &[u8]) -> Option<&'static str> {
 /// fields take the data's values.
 fn xfa_after_data_change(doc: &mut pdfcraft_cos::Document, cx: &mut EditCtx, calculate: bool) -> Result<(), EditError> {
     if let Some(tpl) = cx.xfa.clone() {
-        let mut run = xfa::XfaRun { page_count: cx.pages, out: &mut cx.xfa_out, datasets: cx.xfa_datasets, ran_away: false };
+        let mut run = xfa::XfaRun { page_count: cx.pages, out: &mut cx.xfa_out, datasets: cx.xfa_datasets, ran_away: false, highlight: cx.highlight };
         let r = guard(|| xfa::on_data_replaced(doc, &tpl, calculate, &mut run))
             .unwrap_or_else(|m| Err(format!("laying the form out again failed unexpectedly ({m})")));
         cx.xfa_datasets = run.datasets;
@@ -3337,7 +3345,7 @@ impl Session {
 
     /// Snapshot the session state that affects open-time scripts, dates and signature trust.
     pub fn open_context(&self) -> OpenContext {
-        OpenContext { now: self.now(), js_off: self.js_off, trust: self.trust.clone() }
+        OpenContext { now: self.now(), js_off: self.js_off, trust: self.trust.clone(), highlight: self.field_highlight }
     }
 
     /// Prepare a document without adding it to this session.
@@ -3466,7 +3474,8 @@ impl Session {
                     let mut work = cos.clone();
                     let pages = info.pages.len();
                     let ran = guard(|| {
-                        let mut run = xfa::XfaRun { page_count: pages, out: &mut script_output, datasets: None, ran_away: false };
+                        let mut run =
+                            xfa::XfaRun { page_count: pages, out: &mut script_output, datasets: None, ran_away: false, highlight: context.highlight };
                         let changes = xfa::on_open(&mut work, &tpl, &mut run);
                         if run.ran_away {
                             ran_away = true;
@@ -3640,6 +3649,7 @@ impl Session {
         let now = self.now();
         let today = self.today();
         let js_off = self.js_off;
+        let highlight = self.field_highlight;
         let doc = self.doc_mut(id)?;
         doc.edit_notices.clear();
         let name = doc.name.clone();
@@ -3649,6 +3659,7 @@ impl Session {
             cx.xfa = doc.xfa_template.clone();
         }
         cx.pages = doc.info.pages.len();
+        cx.highlight = highlight;
         cx.today = today;
         let reason = doc.read_only_reason.clone().unwrap_or_default();
         let signed = doc.is_signed();
@@ -3679,7 +3690,7 @@ impl Session {
         }
         let mut next = editor.cos.clone();
         if !js_off && uses_scripts(&edit) {
-            cx.js = Some(js::JsRunner::new(&next, &name));
+            cx.js = Some(js::JsRunner::new(&next, &name, highlight));
         }
         cx.renamed_fields.clear();
         // `next` is a copy: if the edit fails or crashes, the document is unchanged.
@@ -3744,7 +3755,8 @@ impl Session {
             let mut reset = false;
             collect(&edit, &mut changed, &mut reset);
             if !changed.is_empty() || reset {
-                let mut run = xfa::XfaRun { page_count: cx.pages, out: &mut cx.xfa_out, datasets: cx.xfa_datasets, ran_away: false };
+                let mut run =
+                    xfa::XfaRun { page_count: cx.pages, out: &mut cx.xfa_out, datasets: cx.xfa_datasets, ran_away: false, highlight: cx.highlight };
                 // Every changed field's scripts, then the calculations once (after a reset,
                 // only those).
                 let ran = guard(|| xfa::on_changes(&mut next, &tpl, &changed, &mut run))

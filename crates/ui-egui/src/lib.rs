@@ -1166,6 +1166,7 @@ impl PdfCraftApp {
         if let Some(ctx) = &self.ctx {
             worker.set_context(ctx);
         }
+        self.session.set_field_highlight(self.view_defaults.highlight_fields);
         let receiver =
             worker.submit(token, self.session.open_context(), request.name.clone(), request.path.clone(), request.password, request.input)?;
         self.next_open_token = token;
@@ -1283,6 +1284,8 @@ impl PdfCraftApp {
         activate: bool,
     ) -> Result<(), String> {
         use pdfcraft_render::OpenError;
+        // A new document opens with the remembered Highlight fields, which its scripts read.
+        self.session.set_field_highlight(self.view_defaults.highlight_fields);
         let prepared = match self.session.prepare_open(name, path.clone(), bytes.clone(), password) {
             Ok(prepared) => prepared,
             Err(e @ (OpenError::NeedsPassword | OpenError::WrongPassword)) => {
@@ -3128,6 +3131,9 @@ impl eframe::App for PdfCraftApp {
         for view in &mut self.views {
             view.begin_render_frame();
         }
+        // Forms' scripts read Highlight fields as `app.runtimeHighlight`.
+        let highlight = self.active.and_then(|i| self.views.get(i)).map_or(self.view_defaults.highlight_fields, |v| v.highlight_fields);
+        self.session.set_field_highlight(highlight);
         // The window shows the active document's name (or title, if it asks for that).
         let title = self
             .active
