@@ -100,6 +100,8 @@ fn fillable(f: &FormField) -> bool {
     !f.read_only() && !matches!(f.kind, FormFieldKind::PushButton | FormFieldKind::Signature)
 }
 
+/// Editor state for opening widget `widget` of `f`: it starts from the field's value, asks
+/// for keyboard focus, and gives a drop-down a fresh list that places itself from that value.
 fn open_focus(f: &FormField, widget: usize) -> Focus {
     Focus {
         name: f.name.clone(),

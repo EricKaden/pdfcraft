@@ -1073,6 +1073,7 @@ fn auto_size_fields_shrink_and_wrap_typed_text_to_fit_their_box() {
     assert_eq!(on_screen_fit(&h, "fixed", long).0, 10.0);
 }
 
+/// Where the first widget of field `name` is on screen in the first view.
 fn field_rect(h: &Harness<'static, PdfCraftApp>, name: &str) -> egui::Rect {
     let s = h.state();
     let doc = s.session.get(s.views[0].id).unwrap();
@@ -1082,6 +1083,8 @@ fn field_rect(h: &Harness<'static, PdfCraftApp>, name: &str) -> egui::Rect {
 
 /// Filled triangles painted inside `within`, at any depth of the frame's shapes.
 fn triangles_in(h: &Harness<'static, PdfCraftApp>, within: egui::Rect) -> Vec<Vec<egui::Pos2>> {
+    /// Collects the filled three-point paths of `shape` that lie inside `within`, descending into
+    /// nested shape lists.
     fn walk(shape: &egui::Shape, within: egui::Rect, out: &mut Vec<Vec<egui::Pos2>>) {
         match shape {
             egui::Shape::Vec(shapes) => shapes.iter().for_each(|s| walk(s, within, out)),
@@ -1098,6 +1101,7 @@ fn triangles_in(h: &Harness<'static, PdfCraftApp>, within: egui::Rect) -> Vec<Ve
     out
 }
 
+/// A drop-down draws one filled arrow at the right of its box, and a text field draws none.
 #[test]
 fn a_drop_down_shows_its_arrow_and_text_fields_do_not() {
     let mut h = harness();
@@ -1110,6 +1114,8 @@ fn a_drop_down_shows_its_arrow_and_text_fields_do_not() {
     assert!(triangles_in(&h, field_rect(&h, "city")).is_empty(), "a text field has none");
 }
 
+/// A drop-down's list opens on the field's left edge and no wider than the field, without
+/// showing the field's name, and clicking an item chooses it.
 #[test]
 fn a_drop_downs_list_opens_as_wide_as_the_field_without_its_internal_name() {
     let mut h = harness();
@@ -1123,6 +1129,8 @@ fn a_drop_downs_list_opens_as_wide_as_the_field_without_its_internal_name() {
     assert_eq!(value(&h, "country"), ["fr"]);
 }
 
+/// A drop-down with 30 options keeps its scroll bar in its own room, so the items stop short
+/// of the field's right edge.
 #[test]
 fn a_long_drop_down_list_keeps_its_scroll_bar_beside_the_items() {
     let mut h = harness();
@@ -1141,6 +1149,8 @@ fn a_long_drop_down_list_keeps_its_scroll_bar_beside_the_items() {
 
 /// Where `text` is drawn in the last frame, if anywhere.
 fn text_rect(h: &Harness<'static, PdfCraftApp>, text: &str) -> Option<egui::Rect> {
+    /// The rectangle of the text shape in `shape` that reads exactly `text`, searching nested
+    /// shape lists.
     fn walk(shape: &egui::Shape, text: &str) -> Option<egui::Rect> {
         match shape {
             egui::Shape::Vec(shapes) => shapes.iter().find_map(|s| walk(s, text)),
@@ -1151,6 +1161,7 @@ fn text_rect(h: &Harness<'static, PdfCraftApp>, text: &str) -> Option<egui::Rect
     h.output().shapes.iter().find_map(|c| walk(&c.shape, text))
 }
 
+/// Gives the "country" drop-down 30 options, "0000" to "2900", more than its list shows at once.
 fn long_country(h: &mut Harness<'static, PdfCraftApp>) {
     let options: Vec<String> = (0..30).map(|i| format!("{i:02}00")).collect();
     assert!(h.state_mut().apply_edit(pdfcraft_engine::Edit::SetFieldProps {
@@ -1160,6 +1171,7 @@ fn long_country(h: &mut Harness<'static, PdfCraftApp>) {
     h.run_steps(3);
 }
 
+/// A centered drop-down (quadding 1) centers the items of its open list too.
 #[test]
 fn a_drop_downs_list_aligns_its_items_as_the_field_does() {
     let mut h = harness();
@@ -1174,6 +1186,8 @@ fn a_drop_downs_list_aligns_its_items_as_the_field_does() {
     assert!((france.center().x - country.center().x).abs() <= 2.0, "centered as the field is: {france:?} in {country:?}");
 }
 
+/// The arrow keys move through an open drop-down's list without changing the value, Enter
+/// chooses the current item and closes the list, and a reopened list starts from the value.
 #[test]
 fn the_arrow_keys_move_through_a_drop_downs_list_and_enter_chooses() {
     let mut h = harness();
@@ -1196,6 +1210,8 @@ fn the_arrow_keys_move_through_a_drop_downs_list_and_enter_chooses() {
     assert_eq!(value(&h, "country"), ["ca"]);
 }
 
+/// Pressing the scroll bar's down button moves a long drop-down list on one row, and End goes
+/// to the last item, which Enter then chooses.
 #[test]
 fn a_long_drop_down_list_scrolls_by_its_arrow_button_and_to_its_end() {
     let mut h = harness();
@@ -1223,6 +1239,7 @@ fn a_long_drop_down_list_scrolls_by_its_arrow_button_and_to_its_end() {
     assert_eq!(value(&h, "country"), ["2900"]);
 }
 
+/// The mouse wheel over an open long drop-down scrolls its list and leaves the page where it was.
 #[test]
 fn the_mouse_wheel_scrolls_a_long_drop_down_list_and_not_the_page() {
     let mut h = harness();
@@ -1246,6 +1263,8 @@ fn the_mouse_wheel_scrolls_a_long_drop_down_list_and_not_the_page() {
     assert_eq!(h.state().views[0].page_screen_rect(0), page, "the page stayed where it was");
 }
 
+/// With a page taller than the window and the pointer resting on an open drop-down's list,
+/// Home and the down arrow move through the list and leave the page where it was.
 #[test]
 fn an_open_drop_down_keeps_the_arrow_keys_and_home_from_moving_the_page() {
     let mut h = harness();
@@ -1274,6 +1293,8 @@ fn an_open_drop_down_keeps_the_arrow_keys_and_home_from_moving_the_page() {
     assert_eq!(value(&h, "country"), ["0100"], "one item down from the first");
 }
 
+/// When End scrolls a drop-down's list under a resting pointer, Enter chooses the item End
+/// went to, not the one that came under the pointer.
 #[test]
 fn a_pointer_resting_on_a_list_the_keys_scroll_keeps_the_highlight_on_the_keys() {
     let mut h = harness();

@@ -2219,6 +2219,9 @@ impl PageXform {
     }
 }
 
+/// The document view's keyboard shortcuts: find, rotation, zoom (or the page grid's size),
+/// history, Escape, and the paging and scrolling keys. An open form field keeps the paging
+/// and scrolling keys for itself.
 pub fn shortcuts(view: &mut DocView, ctx: &egui::Context, speed: crate::scroll_speed::ScrollSpeed) {
     use egui::{Key, KeyboardShortcut, Modifiers};
     if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, Key::F))) {
