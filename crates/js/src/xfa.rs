@@ -1000,6 +1000,7 @@ fn resolver(ctx: &mut Context, from: usize, many: bool) -> JsResult<JsValue> {
 
 // ── xfa.host, xfa.layout, xfa.event, app, console ───────────────────────────────────────────
 
+/// Record the effect `e` for the viewer.
 fn effect(ctx: &mut Context, e: XfaEffect) -> JsResult<()> {
     host(ctx)?.borrow_mut().push(e);
     Ok(())
@@ -1012,12 +1013,16 @@ fn export_data_object(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsRes
     Ok(JsValue::undefined())
 }
 
+/// `xfa.host.messageBox(…)`: records the message, cut to [`MAX_LINE`] characters, as a message
+/// box and returns 1, the OK button.
 fn message_box(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
     let m = clip(text(&arg(args, 0), ctx)?);
     effect(ctx, XfaEffect::MessageBox(m))?;
     Ok(JsValue::from(1.0))
 }
 
+/// `xfa.host.resetData(…)`: records a reset of the fields named in the comma-separated argument
+/// (every field when it names none).
 fn reset_data(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
     let list = text(&arg(args, 0), ctx)?;
     let names: Vec<String> = list.split(',').map(str::trim).filter(|s| !s.is_empty()).map(str::to_string).collect();
@@ -1025,22 +1030,27 @@ fn reset_data(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsVa
     Ok(JsValue::undefined())
 }
 
+/// `xfa.host.print(…)`: records a request to print.
 fn print(_: &JsValue, _: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
     effect(ctx, XfaEffect::Print)?;
     Ok(JsValue::undefined())
 }
 
+/// `xfa.host.beep()` and `app.beep()`: record a request to beep.
 fn beep(_: &JsValue, _: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
     effect(ctx, XfaEffect::Beep)?;
     Ok(JsValue::undefined())
 }
 
+/// `xfa.host.gotoURL(url)` and `app.launchURL(url)`: record a request to open the link.
 fn goto_url(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
     let u = text(&arg(args, 0), ctx)?;
     effect(ctx, XfaEffect::LaunchUrl(u))?;
     Ok(JsValue::undefined())
 }
 
+/// `xfa.host.setFocus(…)`: records moving the focus to a node, given as a node or as a SOM
+/// expression resolved from the current node (kept as written when nothing matches).
 fn set_focus(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
     let target = arg(args, 0);
     let som = match target.as_object() {
@@ -1059,6 +1069,8 @@ fn set_focus(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsVal
     Ok(JsValue::undefined())
 }
 
+/// `app.execMenuItem(…)`: `SaveAs` and `Save` record a save-as request and `Print` a print
+/// request; other items do nothing.
 fn exec_menu_item(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
     let item = text(&arg(args, 0), ctx)?;
     match item.as_str() {
@@ -1069,42 +1081,54 @@ fn exec_menu_item(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<
     Ok(JsValue::undefined())
 }
 
+/// `recalculate(…)` on a node or on `xfa`: records a request to recalculate the form.
 fn recalculate(_: &JsValue, _: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
     effect(ctx, XfaEffect::Recalculate)?;
     Ok(JsValue::undefined())
 }
 
+/// `xfa.layout.relayout()`, `relayoutPageArea()` and `remerge()`: record a request to lay the
+/// form out again.
 fn relayout(_: &JsValue, _: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
     effect(ctx, XfaEffect::Relayout)?;
     Ok(JsValue::undefined())
 }
 
+/// `console.println(…)`: adds the line, cut to [`MAX_LINE`] characters, to the run's console
+/// output.
 fn console_println(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
     let m = clip(text(&arg(args, 0), ctx)?);
     host(ctx)?.borrow_mut().print(m);
     Ok(JsValue::undefined())
 }
 
+/// `xfa.host.response(…)` and `app.response(…)`: always return `null`, as for a canceled dialog.
 fn response(_: &JsValue, _: &[JsValue], _: &mut Context) -> JsResult<JsValue> {
     Ok(JsValue::null())
 }
 
+/// `xfa.layout.page(…)`: the current page, 1-based, whatever the argument.
 fn layout_page(_: &JsValue, _: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
     Ok(JsValue::from(host(ctx)?.borrow().doc.page as f64 + 1.0))
 }
 
+/// `xfa.layout.absPage(…)`: the current page, 0-based, whatever the argument.
 fn layout_page0(_: &JsValue, _: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
     Ok(JsValue::from(host(ctx)?.borrow().doc.page as f64))
 }
 
+/// `xfa.layout.pageCount()` and `absPageCount()`: the document's page count.
 fn layout_page_count(_: &JsValue, _: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
     Ok(JsValue::from(host(ctx)?.borrow().doc.page_count as f64))
 }
 
+/// The `xfa.layout` measures `h`, `w`, `x`, `y` and `pageSpan`: always 0.
 fn zero(_: &JsValue, _: &[JsValue], _: &mut Context) -> JsResult<JsValue> {
     Ok(JsValue::from(0.0))
 }
 
+/// `xfa.resolveNode(som)`, or `xfa.resolveNodes(som)` when `many`, resolving from the node the
+/// script runs on.
 fn xfa_resolve(ctx: &mut Context, many: bool) -> JsResult<JsValue> {
     let current = host(ctx)?.borrow().current;
     resolver(ctx, current, many)

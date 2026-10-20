@@ -1050,6 +1050,9 @@ fn on_screen_fit(h: &Harness<'static, PdfCraftApp>, name: &str, text: &str) -> (
     }
 }
 
+/// A long value typed into an auto-size single-line field shrinks to fit its width, while short
+/// text keeps a larger size; multiline text wraps and shrinks only as far as the box height needs;
+/// a field with an explicit font size keeps it.
 #[test]
 fn auto_size_fields_shrink_and_wrap_typed_text_to_fit_their_box() {
     let mut h = auto_size_harness();

@@ -553,6 +553,8 @@ fn message(v: &JsValue, key: &str, ctx: &mut Context) -> JsResult<String> {
     }
 }
 
+/// `app.alert(…)`: keeps the message (a string or an object with `cMsg`) as an alert and returns
+/// 1, the OK button.
 fn alert(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
     let m = message(&arg(args, 0), "cMsg", ctx)?;
     host(ctx)?.borrow_mut().alerts.push(m);
@@ -560,11 +562,13 @@ fn alert(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> 
     Ok(JsValue::from(1))
 }
 
+/// `app.beep()`: asks the viewer to beep.
 fn beep(_: &JsValue, _: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
     host(ctx)?.borrow_mut().requests.push(Request::Beep);
     Ok(JsValue::undefined())
 }
 
+/// `app.launchURL(…)`: asks the viewer to open the link, given as a string or an object with `cURL`.
 fn launch_url(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
     let u = message(&arg(args, 0), "cURL", ctx)?;
     host(ctx)?.borrow_mut().requests.push(Request::LaunchUrl(u));
@@ -595,6 +599,7 @@ fn export_data_object(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsRes
     Ok(JsValue::undefined())
 }
 
+/// `app.response(…)`: there is no one to answer, so it returns `null`, as for a canceled dialog.
 fn response(_: &JsValue, _: &[JsValue], _: &mut Context) -> JsResult<JsValue> {
     // No one to answer: as if the dialog was cancelled.
     Ok(JsValue::null())
@@ -897,6 +902,8 @@ fn printx(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsValue>
     Ok(s(&out))
 }
 
+/// The `color` object: named colors (`transparent`, `black`, `red`, `cyan`, `gray`, …) as color
+/// arrays, each a color space (`T`, `G`, `RGB` or `CMYK`) followed by its components.
 fn color_object(ctx: &mut Context) -> JsObject {
     let mut entries: Vec<(&str, Vec<JsValue>)> = vec![
         ("transparent", vec![s("T")]),
