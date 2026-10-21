@@ -430,6 +430,18 @@ pub fn hidden_copy_template() -> String {
     one_page_form(&body)
 }
 
+/// Two fields bound to one data node, as a field inside an area and one beside it share it
+/// (areas have no data scope): `val` and `box.val`. The calculation `c` (printing `ran c`) reads
+/// `box.val`; the button `set` writes `val`.
+pub fn shared_node_template() -> String {
+    one_page_form(
+        r#"  <field name="val" w="2in" h="0.3in"><ui><textEdit/></ui></field>
+  <area name="box"><field name="val" x="0in" y="0in" w="2in" h="0.3in"><ui><textEdit/></ui></field></area>
+  <field name="c" w="2in" h="0.3in" access="readOnly"><ui><textEdit/></ui><calculate><script contentType="application/x-javascript">console.println("ran c"); form1.page.box.val.rawValue</script></calculate></field>
+  <field name="set" w="2in" h="0.3in"><ui><button/></ui><event activity="click"><script contentType="application/x-javascript">form1.page.val.rawValue = "7";</script></event></field>"#,
+    )
+}
+
 /// A PDF shell around `xdp`: one placeholder page, `/NeedsRendering true`, no fields.
 pub fn shell(xdp: &str) -> Vec<u8> {
     let objs: Vec<Vec<u8>> = vec![

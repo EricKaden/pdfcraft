@@ -4534,6 +4534,40 @@ fn a_calculated_field_another_script_writes_calculates_again() {
 /// A scripted form end to end: initialize and calculate on open, recalculation after a change,
 /// a failing validation's message, buttons that add and remove rows and show messages, a check
 /// box that shows a subform (undoable), FormCalc, and a save and reopen that keep it all.
+/// A script's write to a field reaches every field bound to the same data node, and so does
+/// the rerun: a calculation that reads the other field runs again.
+#[test]
+fn a_write_wakes_the_readers_of_every_field_on_the_same_data_node() {
+    let bytes = Arc::new(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::shared_node_template()));
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let id = s.open("shared.pdf", None, bytes, None).expect("opens");
+    s.take_js_output(id);
+    let o = s.run_javascript(id, "", Some("set")).unwrap();
+    assert_eq!(calculations_ran(&o.console), ["c"], "{o:?}");
+    assert_eq!(s.get(id).unwrap().form.iter().find(|f| f.name == "c").map(|f| f.value.clone()), Some(vec!["7".to_string()]));
+}
+
+/// Undoing gives the form back its earlier state and forgets what its calculations read since,
+/// so the next change runs them all once and learns again: a row brought back by undo counts
+/// in the total when it is filled in.
+#[test]
+fn after_an_undo_a_restored_row_counts_in_its_total_again() {
+    let bytes = Arc::new(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::scripted_template()));
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let id = s.open("rows.pdf", None, bytes, None).expect("opens");
+    let value = |s: &Session, n: &str| s.get(id).unwrap().form.iter().find(|f| f.name == n).map(|f| f.value.clone()).unwrap_or_default();
+    s.run_javascript(id, "", Some("addRow")).unwrap();
+    s.apply(id, Edit::SetFieldValue { name: "amount".into(), value: FieldValue::Text("10".into()) }).unwrap();
+    s.apply(id, Edit::SetFieldValue { name: "amount_2".into(), value: FieldValue::Text("32".into()) }).unwrap();
+    assert_eq!(value(&s, "grand"), ["42"]);
+    s.run_javascript(id, "", Some("removeRow")).unwrap();
+    assert_eq!(value(&s, "grand"), ["10"]);
+    s.undo(id).unwrap();
+    assert_eq!(value(&s, "grand"), ["42"], "the row and its total are back");
+    s.apply(id, Edit::SetFieldValue { name: "amount_2".into(), value: FieldValue::Text("50".into()) }).unwrap();
+    assert_eq!(value(&s, "grand"), ["60"], "{:?}", s.take_js_output(id));
+}
+
 #[test]
 fn xfa_scripts_initialize_calculate_validate_toggle_and_add_rows() {
     let bytes = Arc::new(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::scripted_template()));

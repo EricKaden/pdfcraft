@@ -3663,7 +3663,9 @@ impl Session {
         let mut cx = EditCtx::new(now, doc.generation ^ (id.0 << 48));
         if !js_off {
             cx.xfa = doc.xfa_template.clone();
-            cx.xfa_deps = doc.xfa_calc_deps.clone();
+            // A copy, kept only if the edit succeeds: a failed one leaves the record as it was.
+            let deps = doc.xfa_calc_deps.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
+            cx.xfa_deps = Arc::new(std::sync::Mutex::new(deps));
         }
         cx.pages = doc.info.pages.len();
         cx.today = today;
@@ -3825,6 +3827,7 @@ impl Session {
         doc.dirty = true;
         doc.generation += 1;
         doc.edit_notices = notices;
+        doc.xfa_calc_deps = cx.xfa_deps.clone();
         if !cx.xfa_removed.is_empty() {
             let removed: Vec<String> = cx.xfa_removed.iter().map(|n| format!("{XFA_REMOVED_PREFIX}{n}")).collect();
             doc.xfa_warnings.retain(|w| w.starts_with(XFA_REMOVED_PREFIX));
@@ -3855,6 +3858,8 @@ impl Session {
         let current_keys = std::mem::replace(&mut editor.keys, keys);
         editor.redo.push((label.clone(), current, current_keys, scope));
         Self::adopt_keys(doc);
+        // The form is back in an earlier state: what its calculations read is learned again.
+        doc.xfa_calc_deps = Arc::default();
         Self::refresh_scoped(doc, scope).inspect_err(|_| Self::show_released(doc))?;
         Self::sync_dirty(doc);
         doc.generation += 1;
@@ -3870,6 +3875,7 @@ impl Session {
         let current_keys = std::mem::replace(&mut editor.keys, keys);
         editor.undo.push((label.clone(), current, current_keys, scope));
         Self::adopt_keys(doc);
+        doc.xfa_calc_deps = Arc::default();
         Self::refresh_scoped(doc, scope).inspect_err(|_| Self::show_released(doc))?;
         Self::sync_dirty(doc);
         doc.generation += 1;
@@ -4235,6 +4241,7 @@ impl Session {
         editor.undo.clear();
         editor.redo.clear();
         Self::adopt_keys(doc);
+        doc.xfa_calc_deps = Arc::default();
         Self::sync_dirty(doc);
         doc.generation += 1;
         Self::refresh(doc).inspect_err(|_| Self::show_released(doc))

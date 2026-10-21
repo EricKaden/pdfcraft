@@ -332,6 +332,8 @@ struct Runner<'a, 'b> {
     by_som: Option<HashMap<String, String>>,
     /// Widget names by the data node they bind to (built with `by_som`).
     by_path: Option<HashMap<pdfcraft_xfa::DataPath, Vec<String>>>,
+    /// The SOM paths of the fields bound to each data node (built with `by_som`).
+    soms_by_path: Option<HashMap<pdfcraft_xfa::DataPath, Vec<String>>>,
     fields: Option<HashMap<String, FieldInfo>>,
     /// The live form as last built; dropped when a script changed the form.
     cached: Option<LiveForm>,
@@ -374,6 +376,7 @@ impl<'a, 'b> Runner<'a, 'b> {
             field_changes: Default::default(),
             by_som: None,
             by_path: None,
+            soms_by_path: None,
             fields: None,
             cached: None,
             session: None,
@@ -385,23 +388,38 @@ impl<'a, 'b> Runner<'a, 'b> {
         }
     }
 
-    /// The field at `som` was given a value by the script of `by` (`None`: by the user). The
-    /// calculations that read it are due, and so is the field's own calculation when anything
-    /// else wrote it (another viewer runs it again then). A calculation's write wakes nobody
-    /// when it changed nothing, so calculations that agree don't keep waking each other.
+    /// The field at `som` was given a value by the script of `by` (`None`: by the user), and
+    /// with it every field bound to the same data node. The calculations that read any of
+    /// them are due, and so is each one's own calculation when anything else wrote it (another
+    /// viewer runs it again then). A calculation's write wakes nobody when it changed nothing,
+    /// so calculations that agree don't keep waking each other.
     fn wrote(&mut self, som: &str, by: Option<&ScriptEvent>, changed: bool) {
         if by.is_some_and(|e| e.activity == "calculate") && !changed {
             return;
         }
-        let writer = by.map(|e| e.som.as_str());
-        if writer != Some(som) {
-            self.due.insert(som.to_string());
-        }
-        for calc in self.run.deps.readers_of(som) {
-            if writer != Some(calc.as_str()) {
-                self.due.insert(calc);
+        let writer = by.map(|e| e.som.clone());
+        for field in self.bound_with(som) {
+            if writer.as_deref() != Some(field.as_str()) {
+                self.due.insert(field.clone());
+            }
+            for calc in self.run.deps.readers_of(&field) {
+                if writer.as_deref() != Some(calc.as_str()) {
+                    self.due.insert(calc);
+                }
             }
         }
+    }
+
+    /// The SOM paths of the fields bound to the same data node as `som`, `som` among them: a
+    /// value written to one is every one's ([`Self::set_value`]).
+    fn bound_with(&mut self, som: &str) -> Vec<String> {
+        let path = pdfcraft_xfa::data_path(self.tpl, som);
+        self.by_som();
+        let mut fields = self.soms_by_path.as_ref().and_then(|m| m.get(&path)).cloned().unwrap_or_default();
+        if !fields.iter().any(|f| f == som) {
+            fields.push(som.to_string());
+        }
+        fields
     }
 
     /// The live form no longer matches the data (its structure changed): rebuilt for the next
@@ -451,13 +469,17 @@ impl<'a, 'b> Runner<'a, 'b> {
         if self.by_som.is_none() {
             let by_som = pdfcraft_xfa::fields_by_som(self.doc);
             let mut by_path: HashMap<pdfcraft_xfa::DataPath, Vec<String>> = HashMap::new();
+            let mut soms_by_path: HashMap<pdfcraft_xfa::DataPath, Vec<String>> = HashMap::new();
             for (som, name) in &by_som {
-                by_path.entry(pdfcraft_xfa::data_path(self.tpl, som)).or_default().push(name.clone());
+                let path = pdfcraft_xfa::data_path(self.tpl, som);
+                by_path.entry(path.clone()).or_default().push(name.clone());
+                soms_by_path.entry(path).or_default().push(som.clone());
             }
             for names in by_path.values_mut() {
                 names.sort();
             }
             self.by_path = Some(by_path);
+            self.soms_by_path = Some(soms_by_path);
             self.by_som = Some(by_som);
         }
         self.by_som.get_or_insert_with(Default::default)
@@ -621,6 +643,7 @@ impl<'a, 'b> Runner<'a, 'b> {
         self.console(crate::undrawn_field_warnings(self.doc));
         self.by_som = None;
         self.by_path = None;
+        self.soms_by_path = None;
         self.fields = None;
         self.invalidate();
         Ok(())
