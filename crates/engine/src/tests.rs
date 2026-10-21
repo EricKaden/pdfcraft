@@ -4217,6 +4217,8 @@ fn xfa_data_no_field_binds_to_survives_an_edit_and_save() {
     assert!(doc.xfa_warnings.iter().any(|w| w.contains("structured content")));
 }
 
+/// Choice lists, signature and picture fields of an XFA form open with their data, take values
+/// and scripts, and save.
 #[test]
 fn xfa_choice_lists_signature_and_picture_fields_open_fill_script_and_save() {
     let data = "<form><page1><country>Japan</country><langs>English\nSpanish</langs></page1></form>";
@@ -4531,9 +4533,6 @@ fn a_calculated_field_another_script_writes_calculates_again() {
     assert!(total.iter().all(|v| v.is_empty()), "the visible copy's calculation emptied it: {total:?}");
 }
 
-/// A scripted form end to end: initialize and calculate on open, recalculation after a change,
-/// a failing validation's message, buttons that add and remove rows and show messages, a check
-/// box that shows a subform (undoable), FormCalc, and a save and reopen that keep it all.
 /// A script's write to a field reaches every field bound to the same data node, and so does
 /// the rerun: a calculation that reads the other field runs again.
 #[test]
@@ -4568,6 +4567,9 @@ fn after_an_undo_a_restored_row_counts_in_its_total_again() {
     assert_eq!(value(&s, "grand"), ["60"], "{:?}", s.take_js_output(id));
 }
 
+/// A scripted form end to end: initialize and calculate on open, recalculation after a change,
+/// a failing validation's message, buttons that add and remove rows and show messages, a check
+/// box that shows a subform (undoable), FormCalc, and a save and reopen that keep it all.
 #[test]
 fn xfa_scripts_initialize_calculate_validate_toggle_and_add_rows() {
     let bytes = Arc::new(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::scripted_template()));

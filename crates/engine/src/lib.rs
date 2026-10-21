@@ -3849,6 +3849,8 @@ impl Session {
         Ok(())
     }
 
+    /// Undo the last edit of document `id`: its earlier state comes back, and the label of the
+    /// edit undone is returned.
     pub fn undo(&mut self, id: DocId) -> Result<Label, EditError> {
         let doc = self.doc_mut(id)?;
         doc.edit_notices.clear();
@@ -3866,6 +3868,7 @@ impl Session {
         Ok(label)
     }
 
+    /// Redo the last undone edit of document `id`, returning its label.
     pub fn redo(&mut self, id: DocId) -> Result<Label, EditError> {
         let doc = self.doc_mut(id)?;
         doc.edit_notices.clear();

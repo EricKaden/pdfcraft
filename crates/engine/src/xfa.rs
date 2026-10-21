@@ -465,6 +465,7 @@ impl<'a, 'b> Runner<'a, 'b> {
         self.cached.get_or_insert_with(Default::default)
     }
 
+    /// The form's field names by SOM path, built once per layout with the indexes by data node.
     fn by_som(&mut self) -> &HashMap<String, String> {
         if self.by_som.is_none() {
             let by_som = pdfcraft_xfa::fields_by_som(self.doc);
