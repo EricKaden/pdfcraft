@@ -26,6 +26,10 @@ const MAX_RUNS_PER_CALCULATION: usize = 16;
 /// Most calculations whose reads a document keeps: a form that keeps adding rows starts over
 /// past it, and every calculation runs once more, as on opening.
 const MAX_RECORDED_CALCULATIONS: usize = 50_000;
+/// Most field reads a document keeps for all its calculations together: past it, a
+/// calculation's reads are not kept and any change concerns it, so a form whose calculations
+/// each read thousands of fields stays within memory.
+const MAX_RECORDED_READS: usize = 100_000;
 /// Most message boxes, console lines and errors kept for one event.
 const MAX_ALERTS_PER_EVENT: usize = 100;
 const MAX_CONSOLE_PER_EVENT: usize = 1_000;
@@ -145,8 +149,11 @@ pub(crate) struct CalcDeps {
     reads: HashMap<String, Vec<String>>,
     /// By field: the calculations that read it.
     readers: HashMap<String, HashSet<String>>,
-    /// Calculations that read more values than one run's log holds: any change concerns them.
+    /// Calculations that read more values than one run's log holds, or than the document
+    /// keeps: any change concerns them.
     wide: HashSet<String>,
+    /// Reads kept in `reads`, against [`MAX_RECORDED_READS`].
+    kept: usize,
 }
 
 impl CalcDeps {
@@ -154,6 +161,7 @@ impl CalcDeps {
     /// of one run holds).
     fn record(&mut self, calc: &str, reads: Vec<String>, cut: bool) {
         if let Some(old) = self.reads.remove(calc) {
+            self.kept = self.kept.saturating_sub(old.len());
             for field in old {
                 if let Some(set) = self.readers.get_mut(&field) {
                     set.remove(calc);
@@ -166,11 +174,15 @@ impl CalcDeps {
         if self.reads.len() >= MAX_RECORDED_CALCULATIONS {
             *self = CalcDeps::default();
         }
-        if cut {
+        // Too many to keep: the calculation is woken by any change instead.
+        let reads = if cut || self.kept.saturating_add(reads.len()) > MAX_RECORDED_READS {
             self.wide.insert(calc.to_string());
+            Vec::new()
         } else {
             self.wide.remove(calc);
-        }
+            reads
+        };
+        self.kept = self.kept.saturating_add(reads.len());
         for field in &reads {
             self.readers.entry(field.clone()).or_default().insert(calc.to_string());
         }
@@ -1009,5 +1021,33 @@ mod tests {
             split_instance(&Template::default(), "form[0].table[0].row[2]").map(|(p, ps, n, i)| (p.len(), ps, n, i)),
             Some((2, "form[0].table[0]".into(), "row".into(), 2))
         );
+    }
+
+    /// The record of what calculations read stays bounded however many fields they read: past
+    /// [`MAX_RECORDED_READS`] a calculation keeps no reads and any change wakes it; recording a
+    /// calculation again replaces what it read; and its old fields stop naming it.
+    #[test]
+    fn calculation_reads_are_kept_within_a_bound() {
+        let fields = |from: usize, n: usize| (from..from + n).map(|i| format!("f{i}")).collect::<Vec<_>>();
+        let mut deps = CalcDeps::default();
+        let per = 4_000;
+        let fit = MAX_RECORDED_READS / per;
+        for c in 0..fit {
+            deps.record(&format!("c{c}"), fields(c * per, per), false);
+        }
+        assert_eq!(deps.kept, fit * per);
+        assert!(deps.wide.is_empty());
+        // One more doesn't fit: it is kept as reading everything, with nothing stored.
+        deps.record("over", fields(0, per), false);
+        assert_eq!(deps.kept, fit * per, "nothing more was kept");
+        assert!(deps.knows("over") && deps.readers_of("unrelated").contains(&"over".to_string()));
+        // Recording a calculation again replaces its reads, and frees room.
+        deps.record("c0", fields(0, 1), false);
+        assert_eq!(deps.kept, (fit - 1) * per + 1);
+        assert_eq!(deps.readers_of("f1"), vec!["over".to_string()], "c0 no longer reads f1");
+        assert!(deps.readers_of("f0").contains(&"c0".to_string()));
+        // A run whose own log was cut reads everything too.
+        deps.record("cut", Vec::new(), true);
+        assert!(deps.readers_of("anything").contains(&"cut".to_string()));
     }
 }
