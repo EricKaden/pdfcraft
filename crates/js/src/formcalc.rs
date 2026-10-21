@@ -897,6 +897,7 @@ impl Interp<'_> {
         }
     }
 
+    /// `v` as a FormCalc number: null and text that isn't a number are 0, a list is its first.
     fn to_num(&self, v: &Val) -> f64 {
         match v {
             Val::Null => 0.0,
@@ -908,6 +909,7 @@ impl Interp<'_> {
         }
     }
 
+    /// `v` as FormCalc text: null is empty, numbers in FormCalc's shortest form.
     fn to_str(&self, v: &Val) -> String {
         match v {
             Val::Null => String::new(),
@@ -924,6 +926,7 @@ impl Interp<'_> {
         }
     }
 
+    /// Whether `v` counts as true in a FormCalc condition.
     fn truthy(&self, v: &Val) -> bool {
         match v {
             Val::Null => false,
@@ -938,6 +941,7 @@ impl Interp<'_> {
         }
     }
 
+    /// Whether `v` is null: an empty field is, and asking reads its value.
     fn is_null(&self, v: &Val) -> bool {
         match v {
             Val::Null => true,
@@ -1101,6 +1105,8 @@ impl Interp<'_> {
         self.charge(1)
     }
 
+    /// Property `name` of form object `i` as FormCalc reads it: its value, attributes,
+    /// relatives and children by name.
     fn node_member(&mut self, i: usize, name: &str) -> R<Val> {
         let Some(n) = self.node(i) else { return Ok(Val::Null) };
         Ok(match name {
@@ -2070,6 +2076,7 @@ impl Interp<'_> {
         Ok(v)
     }
 
+    /// The FormCalc built-in function `name` (in any case) on `args`.
     fn builtin_inner(&mut self, name: &str, args: &[Expr]) -> R<Val> {
         let lower = name.to_ascii_lowercase();
         let n = |v: f64| Ok(Val::Num(v));

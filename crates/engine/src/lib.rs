@@ -2268,6 +2268,8 @@ struct EditCtx {
 }
 
 impl EditCtx {
+    /// The context of one edit: `now` (the clock's time, `None` without one) and `salt` seed the
+    /// unique ids it hands out.
     fn new(now: Option<i64>, salt: u64) -> Self {
         let mut seed = 0x9E37_79B9_7F4A_7C15u64 ^ salt;
         if let Some(t) = now {
@@ -3375,6 +3377,8 @@ impl Session {
         Ok(self.commit_open(prepared))
     }
 
+    /// Read `bytes` as a document, laying out and scripting an XFA form, without the panic
+    /// guard the caller puts around it.
     fn prepare_open_unguarded(
         context: &OpenContext,
         name: String,

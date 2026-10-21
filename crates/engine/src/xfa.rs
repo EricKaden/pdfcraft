@@ -200,6 +200,7 @@ impl CalcDeps {
     }
 }
 
+/// The live form node `n`, with its descendants, as the script engine's snapshot of it.
 fn to_js(n: &FormNode) -> XfaNode {
     XfaNode {
         name: n.name.clone(),
@@ -350,6 +351,8 @@ struct Runner<'a, 'b> {
 }
 
 impl<'a, 'b> Runner<'a, 'b> {
+    /// A runner for one event's scripts on `doc` and its template `tpl`, sharing `run` with the
+    /// edit around it, with `budget_ms` for all its scripts.
     fn new(doc: &'a mut pdfcraft_cos::Document, tpl: &'a Template, run: &'a mut XfaRun<'b>, budget_ms: u64) -> Self {
         let data = pdfcraft_xfa::data_of(doc);
         let ov = pdfcraft_xfa::overrides(doc);
@@ -839,6 +842,7 @@ impl<'a, 'b> Runner<'a, 'b> {
         }
     }
 
+    /// The `activity` scripts of the object at `som`, in document order.
     fn events_of(&mut self, som: &str, activity: &str) -> Vec<ScriptEvent> {
         self.live().events.iter().filter(|e| e.som == som && e.activity == activity).cloned().collect()
     }
@@ -1009,6 +1013,8 @@ pub(crate) fn mark_script_buttons(doc: &pdfcraft_cos::Document, fields: &mut [pd
 mod tests {
     use super::*;
 
+    /// Names a script gives `resetData` match indexed SOM paths by their last parts, and an
+    /// instance's SOM splits into its parent, name and index.
     #[test]
     fn script_names_match_indexed_som_paths() {
         assert!(som_matches("form[0].page1[0].qty[0]", "qty"));

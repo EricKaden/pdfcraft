@@ -862,6 +862,8 @@ pub(crate) fn resolve_som(h: &XHost, from: usize, expr: &str) -> Vec<usize> {
     cur
 }
 
+/// The live descendants of node `from` named `name` (`from..name` in a SOM path), in document
+/// order, to [`MAX_DEPTH`].
 pub(crate) fn descendants_named(h: &XHost, from: usize, name: &str, depth: usize) -> Vec<usize> {
     let mut out = Vec::new();
     if depth > MAX_DEPTH {
@@ -882,6 +884,8 @@ pub(crate) fn descendants_named(h: &XHost, from: usize, name: &str, depth: usize
     out
 }
 
+/// A property read on a form node's Proxy: its value (noted as read), attributes, relatives,
+/// methods, instance managers and children by name.
 fn node_get(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
     let idx = node_index(&arg(args, 0), ctx)?;
     let key = arg(args, 1);
@@ -975,6 +979,8 @@ fn node_get(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsValu
     })
 }
 
+/// A property set on a form node's Proxy: a value, presence or access becomes an effect;
+/// anything else is taken and ignored.
 fn node_set(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
     let idx = node_index(&arg(args, 0), ctx)?;
     let key = arg(args, 1);
@@ -1017,6 +1023,7 @@ fn node_set(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsValu
     Ok(JsValue::from(true))
 }
 
+/// A form node as text, for `toString` and `valueOf`: its value, noted as read.
 fn node_to_string(this: &JsValue, _: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
     let idx = node_index(this, ctx)?;
     let h = host(ctx)?.borrow();
@@ -1024,6 +1031,7 @@ fn node_to_string(this: &JsValue, _: &[JsValue], ctx: &mut Context) -> JsResult<
     Ok(s(&h.nodes.get(idx).map(|n| n.value.clone()).unwrap_or_default()))
 }
 
+/// A method that does nothing here, for parts of the object model PdfCraft doesn't keep.
 fn noop(_: &JsValue, _: &[JsValue], _: &mut Context) -> JsResult<JsValue> {
     Ok(JsValue::undefined())
 }
