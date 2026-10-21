@@ -20,6 +20,14 @@ use crate::js::Request;
 const MAX_SCRIPTS_PER_EVENT: usize = 2_000;
 /// Most times the form is laid out again for one event (a script adding rows in a loop).
 const MAX_RELAYOUTS_PER_EVENT: usize = 50;
+/// Most message boxes, console lines and errors kept for one event.
+const MAX_ALERTS_PER_EVENT: usize = 100;
+const MAX_CONSOLE_PER_EVENT: usize = 1_000;
+const MAX_ERRORS_PER_EVENT: usize = 100;
+/// Time the scripts of one event may take in all before the rest are skipped: opening (and
+/// the calculations every change runs) is held tighter than a click.
+const OPEN_BUDGET_MS: u64 = 3_000;
+const EVENT_BUDGET_MS: u64 = 5_000;
 /// Most runs of one calculation in one event: calculations that keep changing what the other
 /// reads stop there.
 const MAX_RUNS_PER_CALCULATION: usize = 16;
@@ -30,14 +38,6 @@ const MAX_RECORDED_CALCULATIONS: usize = 50_000;
 /// calculation's reads are not kept and any change concerns it, so a form whose calculations
 /// each read thousands of fields stays within memory.
 const MAX_RECORDED_READS: usize = 100_000;
-/// Most message boxes, console lines and errors kept for one event.
-const MAX_ALERTS_PER_EVENT: usize = 100;
-const MAX_CONSOLE_PER_EVENT: usize = 1_000;
-const MAX_ERRORS_PER_EVENT: usize = 100;
-/// Time the scripts of one event may take in all before the rest are skipped: opening (and
-/// the calculations every change runs) is held tighter than a click.
-const OPEN_BUDGET_MS: u64 = 3_000;
-const EVENT_BUDGET_MS: u64 = 5_000;
 
 /// Engine limits for one script: initialize, calculate and validate scripts run without the
 /// user asking (on open, on every change), so they get fewer loop iterations than a click.
@@ -351,8 +351,8 @@ struct Runner<'a, 'b> {
 }
 
 impl<'a, 'b> Runner<'a, 'b> {
-    /// A runner for one event's scripts on `doc` and its template `tpl`, sharing `run` with the
-    /// edit around it, with `budget_ms` for all its scripts.
+    /// A runner over `doc` for one event, with `budget_ms` for its scripts; the data and
+    /// overrides are read from the document now.
     fn new(doc: &'a mut pdfcraft_cos::Document, tpl: &'a Template, run: &'a mut XfaRun<'b>, budget_ms: u64) -> Self {
         let data = pdfcraft_xfa::data_of(doc);
         let ov = pdfcraft_xfa::overrides(doc);
@@ -1013,8 +1013,8 @@ pub(crate) fn mark_script_buttons(doc: &pdfcraft_cos::Document, fields: &mut [pd
 mod tests {
     use super::*;
 
-    /// Names a script gives `resetData` match indexed SOM paths by their last parts, and an
-    /// instance's SOM splits into its parent, name and index.
+    /// Names scripts pass (`qty`, `page1.qty`, `xfa.form.form.page1.qty`) match the indexed SOM
+    /// paths of the objects they name, and nothing else.
     #[test]
     fn script_names_match_indexed_som_paths() {
         assert!(som_matches("form[0].page1[0].qty[0]", "qty"));
