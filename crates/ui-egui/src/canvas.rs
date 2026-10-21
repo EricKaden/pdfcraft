@@ -372,54 +372,69 @@ pub(crate) fn sign_tabs(
     empty.filter(|(name, r)| signable.contains(&(*name, r.map(f64::to_bits)))).map(|(_, r)| r).collect()
 }
 
-/// Height of a sign tab, in points.
-const SIGN_TAB_HEIGHT: f32 = 18.0;
-/// Size of the signature icon on a sign tab.
-const SIGN_TAB_ICON: f32 = 12.0;
-/// Gap between a sign tab and its field's edges.
-const SIGN_TAB_INSET: f32 = 3.0;
-/// Room left and right of a sign tab's contents, and between its icon and label.
-const SIGN_TAB_PAD: f32 = 5.0;
+/// The largest sign tab's height, in points. Every other size is a share of the tab's height,
+/// taken from this one: a 3 pt inset, a 12 pt icon, 5 pt padding, an 11 pt label and 4 pt corners.
+const SIGN_TAB_MAX: f32 = 18.0;
+/// The smallest sign tab's height, in points: a field too small for this chip gets no tab.
+const SIGN_TAB_MIN: f32 = 10.0;
+/// The share of its field's height on screen that a sign tab takes, between the two sizes.
+const SIGN_TAB_SHARE: f32 = 0.4;
+/// The smallest sign tab that carries the label; below it the tab is the icon alone.
+const SIGN_TAB_LABEL_MIN: f32 = 14.0;
+/// The label's font size on the largest sign tab; it shrinks with the tab.
+const SIGN_TAB_FONT: f32 = 11.0;
 
 /// Where one sign tab is drawn on screen: its chip, the icon's square and, when the label fits,
-/// the point where the label starts (its left edge, on the chip's center line).
+/// the point where the label starts (its left edge, on the chip's center line), with the
+/// label's font size and the chip's corner radius at this tab's size.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct SignTab {
     pub rect: Rect,
     pub icon: Rect,
     pub label: Option<Pos2>,
+    pub font: f32,
+    pub radius: f32,
 }
 
-/// Lays out a sign tab inside the top-left corner of `field` (the widget on screen) for a label
-/// `label_width` points wide. The tab takes at most half the field's width: it drops the label
-/// when only the icon fits, and is left out on a field too small (or not finite) for even that.
+/// Lays out a sign tab inside the top-left corner of `field` (the widget on screen), for a label
+/// `label_width` points wide at [`SIGN_TAB_FONT`], its size on the largest tab. The tab is
+/// [`SIGN_TAB_SHARE`] of the field's height, from [`SIGN_TAB_MIN`] to [`SIGN_TAB_MAX`], and its
+/// inset, icon, padding, label and corners scale with it. It carries the label from
+/// [`SIGN_TAB_LABEL_MIN`] up when the whole tab fits in half the field's width, and is a square
+/// icon chip otherwise. It is left out when even that chip doesn't fit, or the field isn't finite.
 pub(crate) fn sign_tab_layout(field: Rect, label_width: f32) -> Option<SignTab> {
-    if !field.is_finite() || field.height() < SIGN_TAB_HEIGHT + 2.0 * SIGN_TAB_INSET {
+    if !field.is_finite() {
         return None;
     }
-    let room = field.width() / 2.0 - SIGN_TAB_INSET;
-    let full = SIGN_TAB_PAD + SIGN_TAB_ICON + SIGN_TAB_PAD + label_width + SIGN_TAB_PAD;
-    let with_label = label_width.is_finite() && label_width > 0.0 && full <= room;
-    let width = if with_label { full } else { SIGN_TAB_HEIGHT };
-    if width > room {
+    // Finite, so the clamp has a number to work on (and its bounds are constants in order).
+    let h = (field.height() * SIGN_TAB_SHARE).clamp(SIGN_TAB_MIN, SIGN_TAB_MAX);
+    let scale = h / SIGN_TAB_MAX;
+    let (inset, icon_side, pad) = (3.0 * scale, 12.0 * scale, 5.0 * scale);
+    if field.height() < h + 2.0 * inset || h > field.width() / 2.0 {
         return None;
     }
-    let rect = Rect::from_min_size(field.min + vec2(SIGN_TAB_INSET, SIGN_TAB_INSET), vec2(width, SIGN_TAB_HEIGHT));
-    let icon_x = if with_label { rect.left() + SIGN_TAB_PAD } else { rect.center().x - SIGN_TAB_ICON / 2.0 };
-    let icon = Rect::from_min_size(pos2(icon_x, rect.center().y - SIGN_TAB_ICON / 2.0), Vec2::splat(SIGN_TAB_ICON));
-    let label = with_label.then(|| pos2(icon.right() + SIGN_TAB_PAD, rect.center().y));
-    Some(SignTab { rect, icon, label })
+    let full = pad + icon_side + pad + label_width * scale + pad;
+    let with_label = h >= SIGN_TAB_LABEL_MIN && label_width.is_finite() && label_width > 0.0 && full <= field.width() / 2.0;
+    let width = if with_label { full } else { h };
+    let rect = Rect::from_min_size(field.min + Vec2::splat(inset), vec2(width, h));
+    let icon_x = if with_label { rect.left() + pad } else { rect.center().x - icon_side / 2.0 };
+    let icon = Rect::from_min_size(pos2(icon_x, rect.center().y - icon_side / 2.0), Vec2::splat(icon_side));
+    let label = with_label.then(|| pos2(icon.right() + pad, rect.center().y));
+    Some(SignTab { rect, icon, label, font: SIGN_TAB_FONT * scale, radius: 4.0 * scale })
 }
 
 /// Paints the sign tab of an empty signature field whose widget is at `field` on screen: an
 /// accent chip with the signature icon and "Sign" in white, as the app's primary buttons are.
-/// Screen-only chrome, like the validation badges.
+/// The label is measured at its largest size to lay the tab out and drawn at the tab's size;
+/// text scales with its size, and the padding takes up any rounding. Screen-only chrome, like
+/// the validation badges.
 fn paint_sign_tab(ui: &egui::Ui, painter: &egui::Painter, field: Rect, t: &Tokens) {
-    let galley = ui.fonts_mut(|f| f.layout_no_wrap(tl!("Sign").to_string(), theme::semibold(11.0), Color32::WHITE));
-    let Some(tab) = sign_tab_layout(field, galley.size().x) else { return };
-    painter.rect_filled(tab.rect, CornerRadius::same(4), t.accent);
-    icons::paint(ui, tab.icon, "signature", SIGN_TAB_ICON, Color32::WHITE);
+    let measure = |size: f32| ui.fonts_mut(|f| f.layout_no_wrap(tl!("Sign").to_string(), theme::semibold(size), Color32::WHITE));
+    let Some(tab) = sign_tab_layout(field, measure(SIGN_TAB_FONT).size().x) else { return };
+    painter.rect_filled(tab.rect, egui::epaint::CornerRadiusF32::same(tab.radius), t.accent);
+    icons::paint(ui, tab.icon, "signature", tab.icon.width(), Color32::WHITE);
     if let Some(at) = tab.label {
+        let galley = measure(tab.font);
         painter.galley(at - vec2(0.0, galley.size().y / 2.0), galley, Color32::WHITE);
     }
 }
@@ -5544,40 +5559,80 @@ mod sign_tab_tests {
         assert_eq!(tabbed(&cases), Vec::<&str>::new());
     }
 
-    /// A roomy field gets the whole tab inside its top-left corner: the icon, then the label,
-    /// on no more than half the field's width.
-    #[test]
-    fn sign_tab_layout_puts_icon_and_label_in_the_top_left_corner() {
-        let field = Rect::from_min_size(pos2(100.0, 200.0), vec2(400.0, 120.0));
-        let tab = sign_tab_layout(field, 30.0).expect("fits");
-        assert_eq!(tab.rect.min, field.min + vec2(SIGN_TAB_INSET, SIGN_TAB_INSET));
-        assert_eq!(tab.rect.height(), SIGN_TAB_HEIGHT);
-        assert!(field.contains_rect(tab.rect) && tab.rect.width() <= field.width() / 2.0, "{tab:?}");
-        assert!(tab.rect.contains_rect(tab.icon), "{tab:?}");
-        let at = tab.label.expect("the label fits");
-        assert!(at.x >= tab.icon.right() && at.x + 30.0 <= tab.rect.right(), "{tab:?}");
-        assert_eq!(at.y, tab.rect.center().y);
+    /// Whether two layout sizes match, to a hundredth of a point.
+    fn near(a: f32, b: f32) -> bool {
+        (a - b).abs() < 0.01
     }
 
-    /// A field with room for the icon but not the label gets the icon alone, and one too small
-    /// for even that, or with a rectangle that isn't finite, gets no tab. A label that can't be
-    /// measured is left out instead of drawn at a NaN position.
+    /// What a field `width` by `height` points on screen shows, for a label 30 pt wide on the
+    /// largest tab: "label" (the full tab), "icon" (the square chip) or "none".
+    fn shows(width: f32, height: f32) -> &'static str {
+        match sign_tab_layout(Rect::from_min_size(Pos2::ZERO, vec2(width, height)), 30.0) {
+            Some(tab) if tab.label.is_some() => "label",
+            Some(_) => "icon",
+            None => "none",
+        }
+    }
+
+    /// The tab is 0.4 of the field's height on screen, at most 18 pt: a tall, wide field gets the
+    /// 18 pt tab with its label 3 pt inside the corner, and a 29 pt field (a 22 pt box at fit
+    /// width) an 11.6 pt icon chip, too small for the label, with the inset and icon scaled to it.
     #[test]
-    fn sign_tab_layout_drops_the_label_then_the_tab_on_small_fields() {
-        let narrow = Rect::from_min_size(Pos2::ZERO, vec2(60.0, 40.0));
-        let icon_only = sign_tab_layout(narrow, 30.0).expect("the icon fits");
-        assert_eq!(icon_only.label, None);
-        assert!(narrow.contains_rect(icon_only.rect) && icon_only.rect.contains_rect(icon_only.icon), "{icon_only:?}");
+    fn sign_tab_layout_scales_the_chip_with_the_field_height() {
+        let large = Rect::from_min_size(pos2(100.0, 200.0), vec2(400.0, 60.0));
+        let tab = sign_tab_layout(large, 30.0).expect("fits");
+        assert!(near(tab.rect.height(), 18.0) && tab.rect.min == large.min + vec2(3.0, 3.0), "{tab:?}");
+        assert!(near(tab.icon.width(), 12.0) && tab.rect.contains_rect(tab.icon), "{tab:?}");
+        let at = tab.label.expect("the label fits");
+        assert!(at.x >= tab.icon.right() && at.x + 30.0 <= tab.rect.right() && at.y == tab.rect.center().y, "{tab:?}");
+
+        let short = Rect::from_min_size(pos2(100.0, 200.0), vec2(400.0, 29.0));
+        let tab = sign_tab_layout(short, 30.0).expect("fits");
+        assert!(near(tab.rect.height(), 11.6) && near(tab.rect.width(), 11.6) && tab.label.is_none(), "{tab:?}");
+        let inset = tab.rect.min - short.min;
+        assert!(near(inset.x, 11.6 / 6.0) && near(inset.y, 11.6 / 6.0) && short.contains_rect(tab.rect), "{tab:?}");
+        assert!(near(tab.icon.width(), 11.6 * 2.0 / 3.0) && tab.rect.contains_rect(tab.icon), "{tab:?}");
+    }
+
+    /// A 19 pt field (a 14 pt box at fit width) still gets the smallest chip, 10 pt with the icon
+    /// alone. A 12 pt field is too short for even that, and a rectangle that isn't finite gets
+    /// nothing. A label that can't be measured is left out instead of drawn at a NaN position.
+    #[test]
+    fn sign_tab_layout_keeps_a_small_icon_on_short_fields_and_none_below() {
+        let field = Rect::from_min_size(pos2(100.0, 200.0), vec2(400.0, 19.0));
+        let tab = sign_tab_layout(field, 30.0).expect("the smallest chip fits");
+        assert!(near(tab.rect.height(), 10.0) && near(tab.rect.width(), 10.0) && tab.label.is_none(), "{tab:?}");
+        assert!(field.contains_rect(tab.rect) && tab.rect.contains_rect(tab.icon), "{tab:?}");
         let cases = [
-            ("too short", Rect::from_min_size(Pos2::ZERO, vec2(400.0, 20.0))),
-            ("too narrow", Rect::from_min_size(Pos2::ZERO, vec2(30.0, 40.0))),
+            ("12 pt tall", Rect::from_min_size(Pos2::ZERO, vec2(400.0, 12.0))),
             ("infinite", Rect::from_min_max(Pos2::ZERO, pos2(f32::INFINITY, 40.0))),
             ("NaN", Rect::from_min_max(pos2(f32::NAN, 0.0), pos2(400.0, 40.0))),
         ];
         let laid_out: Vec<&str> = cases.iter().filter(|(_, r)| sign_tab_layout(*r, 30.0).is_some()).map(|c| c.0).collect();
         assert_eq!(laid_out, Vec::<&str>::new());
-        let roomy = Rect::from_min_size(Pos2::ZERO, vec2(400.0, 120.0));
+        let roomy = Rect::from_min_size(Pos2::ZERO, vec2(400.0, 60.0));
         assert_eq!(sign_tab_layout(roomy, f32::NAN).map(|t| t.label), Some(None));
+    }
+
+    /// The label's font and the chip's corners shrink with the tab: 11 pt and 4 pt on the largest
+    /// tab, 8.8 pt and 3.2 pt on the 14.4 pt tab of a 36 pt field.
+    #[test]
+    fn sign_tab_layout_scales_the_label_font_and_corners_with_the_chip() {
+        let large = sign_tab_layout(Rect::from_min_size(Pos2::ZERO, vec2(400.0, 60.0)), 30.0).expect("fits");
+        assert!(near(large.font, 11.0) && near(large.radius, 4.0), "{large:?}");
+        let small = sign_tab_layout(Rect::from_min_size(Pos2::ZERO, vec2(400.0, 36.0)), 30.0).expect("fits");
+        assert!(near(small.font, 8.8) && near(small.radius, 3.2) && small.label.is_some(), "{small:?}");
+    }
+
+    /// As a 36 pt field (a 14.4 pt tab, its label 24 pt wide at that size) narrows, the tab keeps
+    /// its label while the whole tab fits in half the width (91.2 pt), then shows the icon alone
+    /// while the chip does (28.8 pt), then nothing.
+    #[test]
+    fn sign_tab_layout_drops_the_label_then_the_tab_as_the_field_narrows() {
+        let widths = [400.0, 92.0, 90.0, 29.0, 28.0];
+        assert_eq!(widths.map(|w| shows(w, 36.0)), ["label", "label", "icon", "icon", "none"]);
+        let tab = sign_tab_layout(Rect::from_min_size(Pos2::ZERO, vec2(92.0, 36.0)), 30.0).expect("fits");
+        assert!(near(tab.rect.height(), 14.4) && tab.rect.width() <= 46.0, "{tab:?}");
     }
 
     /// One page with three signature fields: Approver is empty, Witness is signed (a signature
