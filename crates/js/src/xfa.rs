@@ -8,7 +8,7 @@
 //! children, then its siblings, then each ancestor's children.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use boa_engine::object::ObjectInitializer;
 use boa_engine::object::builtins::{JsArray, JsProxy};
@@ -140,6 +140,13 @@ pub struct XfaOutcome {
     /// The script ran past its time limit and was left running on its own thread (the engine
     /// can't interrupt it): the caller should run no more of this form's scripts.
     pub abandoned: bool,
+    /// The fields and exclusion groups whose value the script read, by SOM, in the order first
+    /// read: a calculation's dependencies (XFA dependency tracking), so that it runs again
+    /// when one of them changes.
+    pub reads: Vec<String>,
+    /// The script read more values than [`MAX_READS`]: `reads` is incomplete, so any change may
+    /// concern it.
+    pub reads_cut: bool,
 }
 
 /// Most nodes a snapshot may hold.
@@ -154,6 +161,8 @@ pub const MAX_EFFECTS: usize = 10_000;
 pub const MAX_ALERTS: usize = 100;
 /// Most console lines one run may print.
 pub const MAX_CONSOLE: usize = 1_000;
+/// Most values one run's [`XfaOutcome::reads`] lists.
+pub const MAX_READS: usize = 4_096;
 /// Longest message or console line kept, in characters.
 const MAX_LINE: usize = 4_096;
 
@@ -207,6 +216,14 @@ pub(crate) struct HNode {
     pub(crate) gone: bool,
 }
 
+/// The values a script read (see [`XfaOutcome::reads`]).
+#[derive(Default)]
+pub(crate) struct ReadLog {
+    soms: Vec<String>,
+    seen: HashSet<usize>,
+    cut: bool,
+}
+
 /// The form as a script sees and changes it, with the effects it records.
 pub(crate) struct XHost {
     pub(crate) nodes: Vec<HNode>,
@@ -227,6 +244,8 @@ pub(crate) struct XHost {
     clipped_values: usize,
     dropped_alerts: usize,
     dropped_console: usize,
+    /// Behind a cell so that reading a value, which only takes the host, can note it.
+    reads: RefCell<ReadLog>,
 }
 
 impl XHost {
@@ -251,7 +270,33 @@ impl XHost {
             clipped_values: 0,
             dropped_alerts: 0,
             dropped_console: 0,
+            reads: RefCell::default(),
         }
+    }
+
+    /// Note that the script read the value of node `i`. Only fields and exclusion groups hold
+    /// values; past [`MAX_READS`] the log is marked cut instead.
+    pub(crate) fn read(&self, i: usize) {
+        let Some(n) = self.nodes.get(i) else { return };
+        if n.gone || !matches!(n.kind, XfaKind::Field | XfaKind::ExclGroup) {
+            return;
+        }
+        // Never borrowed elsewhere while a value is read; a busy cell only loses the note.
+        let Ok(mut log) = self.reads.try_borrow_mut() else { return };
+        if !log.seen.insert(i) {
+            return;
+        }
+        if log.soms.len() >= MAX_READS {
+            log.cut = true;
+        } else {
+            log.soms.push(n.som.clone());
+        }
+    }
+
+    /// The values the script read, and whether there were more than the log holds.
+    pub(crate) fn take_reads(&mut self) -> (Vec<String>, bool) {
+        let log = std::mem::take(self.reads.get_mut());
+        (log.soms, log.cut)
     }
 
     /// Record an effect: values, presence and access set again on the same object replace the
@@ -852,15 +897,25 @@ fn node_get(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsValu
     let (name, som, kind, value, presence, access, index, parent, children) = snapshot;
     Ok(match key.as_str() {
         IDX => JsValue::from(idx as f64),
-        "rawValue" | "value" => host(ctx)?.borrow().nodes.get(idx).map_or(JsValue::null(), value_js),
-        "formattedValue" => s(&value),
+        "rawValue" | "value" => {
+            let h = host(ctx)?.borrow();
+            h.read(idx);
+            h.nodes.get(idx).map_or(JsValue::null(), value_js)
+        }
+        "formattedValue" => {
+            host(ctx)?.borrow().read(idx);
+            s(&value)
+        }
         "name" => s(&name),
         "somExpression" => s(&som),
         "className" => s(kind.class_name()),
         "index" | "instanceIndex" => JsValue::from(index as f64),
         "presence" => s(&presence),
         "access" => s(&access),
-        "isNull" => JsValue::from(value.is_empty()),
+        "isNull" => {
+            host(ctx)?.borrow().read(idx);
+            JsValue::from(value.is_empty())
+        }
         "mandatory" => s("disabled"),
         "parent" => match parent {
             Some(p) => node_object(ctx, p)?,
@@ -964,7 +1019,9 @@ fn node_set(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsValu
 
 fn node_to_string(this: &JsValue, _: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
     let idx = node_index(this, ctx)?;
-    Ok(s(&host(ctx)?.borrow().nodes.get(idx).map(|n| n.value.clone()).unwrap_or_default()))
+    let h = host(ctx)?.borrow();
+    h.read(idx);
+    Ok(s(&h.nodes.get(idx).map(|n| n.value.clone()).unwrap_or_default()))
 }
 
 fn noop(_: &JsValue, _: &[JsValue], _: &mut Context) -> JsResult<JsValue> {
@@ -1487,7 +1544,8 @@ pub(crate) fn run_here(script: &str, event: &XfaEvent, doc: &XfaDoc, root: XfaNo
         out.error = Some(e.to_string());
     }
     if let Some(h) = ctx.remove_data::<Shared>() {
-        let h = h.into_inner();
+        let mut h = h.into_inner();
+        (out.reads, out.reads_cut) = h.take_reads();
         out.notes = h.notes();
         out.effects = h.effects;
         out.console = h.console;

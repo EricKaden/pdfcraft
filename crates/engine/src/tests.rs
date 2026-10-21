@@ -4469,6 +4469,57 @@ fn xfa_scripts_of_one_event_see_the_form_as_the_engine_holds_it() {
     assert_eq!(value(&s, "summary"), vec!["Country: CA".to_string()]);
 }
 
+/// Which of a fixture's calculations an event ran, in order, from the `ran …` lines they print.
+fn calculations_ran(console: &[String]) -> Vec<String> {
+    console.iter().filter_map(|l| l.trim().strip_prefix("ran ").map(str::to_string)).collect()
+}
+
+/// A change reruns only the calculations that read what changed, as another viewer does
+/// (black-box, on a form shaped like this fixture). On opening, each runs once in document
+/// order. A typed value reruns its readers, and a click that writes nothing reruns nothing.
+/// A click that writes a field, even its own value again, reruns that field's readers.
+/// Writing a field that a calculation only writes reruns nothing.
+#[test]
+fn xfa_calculations_rerun_only_where_what_they_read_changed() {
+    let bytes = Arc::new(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::recalculation_template()));
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let id = s.open("recalc.pdf", None, bytes, None).expect("opens");
+    let value = |s: &Session, n: &str| s.get(id).unwrap().form.iter().find(|f| f.name == n).map(|f| f.value.clone()).unwrap_or_default();
+    let none = Vec::<String>::new();
+    assert_eq!(calculations_ran(&s.take_js_output(id).console), ["A", "C", "B"], "each once, in document order");
+    assert_eq!(value(&s, "shared"), ["B"]);
+    s.apply(id, Edit::SetFieldValue { name: "entry".into(), value: FieldValue::Text("5".into()) }).unwrap();
+    assert_eq!(calculations_ran(&s.take_js_output(id).console), ["A"], "only the calculation that reads entry");
+    assert_eq!(value(&s, "shared"), ["A"]);
+    let o = s.run_javascript(id, "", Some("noop")).unwrap();
+    assert_eq!(calculations_ran(&o.console), none, "a click that writes nothing reruns nothing");
+    let o = s.run_javascript(id, "", Some("same")).unwrap();
+    assert_eq!(calculations_ran(&o.console), ["A"], "entry written again, with the same value");
+    let o = s.run_javascript(id, "", Some("setw")).unwrap();
+    assert_eq!(calculations_ran(&o.console), none, "C writes boxW but doesn't read it");
+    assert_eq!(value(&s, "boxW"), ["Button 3 wrote this"]);
+    assert_eq!(value(&s, "shared"), ["A"]);
+}
+
+/// When another script writes a field that has a calculation of its own, that calculation
+/// runs again, as another viewer does (black-box, on a form shaped like this fixture). The
+/// hidden copy writes the visible copy's total after the visible copy emptied it, and the
+/// visible copy's calculation empties it again. Showing the section changes no value, so
+/// nothing reruns.
+#[test]
+fn a_calculated_field_another_script_writes_calculates_again() {
+    let bytes = Arc::new(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::hidden_copy_template()));
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let id = s.open("copies.pdf", None, bytes, None).expect("opens");
+    let out = s.take_js_output(id);
+    assert_eq!(calculations_ran(&out.console), ["P", "E", "P"], "{:?}", out.errors);
+    s.apply(id, Edit::SetFieldValue { name: "show".into(), value: FieldValue::Check(true) }).unwrap();
+    let out = s.take_js_output(id);
+    assert_eq!(calculations_ran(&out.console), Vec::<String>::new(), "{:?}", out.errors);
+    let total = s.get(id).unwrap().form.iter().find(|f| f.name == "total").map(|f| f.value.clone()).expect("the shown section's total");
+    assert!(total.iter().all(|v| v.is_empty()), "the visible copy's calculation emptied it: {total:?}");
+}
+
 #[test]
 fn xfa_scripts_initialize_calculate_validate_toggle_and_add_rows() {
     let bytes = Arc::new(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::scripted_template()));

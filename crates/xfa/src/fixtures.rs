@@ -352,6 +352,84 @@ pub fn many_calculations_template(sections: usize, rows: usize) -> String {
     )
 }
 
+/// The form wrapper the recalculation fixtures share: one letter page holding `body`.
+fn one_page_form(body: &str) -> String {
+    format!(
+        r##"<?xml version="1.0" encoding="UTF-8"?>
+<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/">
+<template xmlns="http://www.xfa.org/schema/xfa-template/3.3/">
+<subform name="form1" layout="tb">
+ <pageSet><pageArea name="front"><contentArea x="0.5in" y="0.5in" w="7.5in" h="10in"/><medium short="8.5in" long="11in"/></pageArea></pageSet>
+ <subform name="page" layout="tb">
+{body}
+ </subform>
+</subform>
+</template>
+</xdp:xdp>
+"##
+    )
+}
+
+/// Three calculations that print `ran A`, `ran C` and `ran B` when they run, in that document
+/// order. `A` reads `entry` and writes `shared`. `C` only writes `boxW`. `B`, in a hidden
+/// subform, only writes `shared`. Three buttons: `noop` changes nothing, `same` writes `entry`
+/// its own value again, and `setw` writes `boxW`.
+pub fn recalculation_template() -> String {
+    let field = |name: &str, extra: &str| format!(r#"  <field name="{name}" w="3in" h="0.3in"><ui><textEdit/></ui>{extra}</field>"#);
+    let calc = |js: &str| format!(r#"<calculate><script contentType="application/x-javascript">{js}</script></calculate>"#);
+    let button = |name: &str, js: &str| {
+        format!(
+            r#"  <field name="{name}" w="2in" h="0.3in"><ui><button/></ui><event activity="click"><script contentType="application/x-javascript">{js}</script></event></field>"#
+        )
+    };
+    let body = [
+        field("entry", ""),
+        field("shared", ""),
+        field("boxW", ""),
+        button("noop", "var n = 1;"),
+        button("same", "form1.page.entry.rawValue = form1.page.entry.rawValue;"),
+        button("setw", r#"form1.page.boxW.rawValue = "Button 3 wrote this";"#),
+        format!(
+            r#"  <subform name="A" layout="tb">{}</subform>"#,
+            field("a", &calc(r#"console.println("ran A"); var v = form1.page.entry.rawValue; form1.page.shared.rawValue = "A"; "a";"#))
+        ),
+        format!(
+            r#"  <subform name="C" layout="tb">{}</subform>"#,
+            field("c", &calc(r#"console.println("ran C"); form1.page.boxW.rawValue = "C wrote this"; "c";"#))
+        ),
+        format!(
+            r#"  <subform name="B" layout="tb" presence="hidden">{}</subform>"#,
+            field("b", &calc(r#"console.println("ran B"); form1.page.shared.rawValue = "B"; "b";"#))
+        ),
+    ];
+    one_page_form(&body.join("\n"))
+}
+
+/// A section with a hidden second copy, as real forms carry for another route through them.
+/// Each copy's `total` calculation (printing `ran P` or `ran E`) writes the visible copy's
+/// `total` through its full path, then empties its own `total` while `days` is empty. The
+/// hidden copy comes later in document order. The check box `show` shows the visible section.
+pub fn hidden_copy_template() -> String {
+    let section = |copy: &str| {
+        format!(
+            r#"<subform name="section" layout="tb" presence="hidden">
+   <field name="days" w="1in" h="0.3in" presence="invisible"><ui><numericEdit/></ui></field>
+   <field name="total" w="1in" h="0.3in" access="readOnly"><ui><textEdit/></ui><bind match="none"/><calculate><script contentType="application/x-javascript">console.println("ran {copy}"); form1.page.section.total.rawValue = Number(form1.page.section.days.rawValue || 0); if (form1.page.section.days.rawValue == null) {{ this.rawValue = ""; }}</script></calculate></field>
+  </subform>"#
+        )
+    };
+    let body = format!(
+        r#"  <field name="show" w="2in" h="0.3in"><ui><checkButton/></ui><items><integer>1</integer><integer>0</integer></items><event activity="change"><script contentType="application/x-javascript">section.presence = "visible";</script></event></field>
+  {}
+  <subform name="spare" layout="tb" presence="hidden">
+  {}
+  </subform>"#,
+        section("P"),
+        section("E")
+    );
+    one_page_form(&body)
+}
+
 /// A PDF shell around `xdp`: one placeholder page, `/NeedsRendering true`, no fields.
 pub fn shell(xdp: &str) -> Vec<u8> {
     let objs: Vec<Vec<u8>> = vec![

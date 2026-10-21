@@ -393,6 +393,9 @@ pub struct Document {
     pub xfa: Option<XfaLayout>,
     /// The parsed template of a laid-out XFA form, for its scripts.
     xfa_template: Option<Arc<pdfcraft_xfa::model::Template>>,
+    /// What each of the form's calculations read when it last ran, so a change reruns only
+    /// the ones it concerns.
+    xfa_calc_deps: Arc<std::sync::Mutex<xfa::CalcDeps>>,
     /// A script of the XFA form ran away, so its scripts are off (see [`Document::xfa_scripts_off`]).
     xfa_scripts_off: bool,
     /// A content-only refresh keeps `info` from before the edit; an edit may have added or
@@ -2248,6 +2251,8 @@ struct EditCtx {
     xfa_datasets: Option<pdfcraft_cos::ObjRef>,
     /// A form script ran too long and was abandoned: the document's scripts go off.
     xfa_ran_away: bool,
+    /// What the form's calculations read (the document's, shared).
+    xfa_deps: Arc<std::sync::Mutex<xfa::CalcDeps>>,
     /// The edit took the XFA out of the form: what went with it, for the document's warnings.
     xfa_removed: Vec<String>,
     /// Pages in the document, for `xfa.layout.pageCount()`.
@@ -2279,6 +2284,7 @@ impl EditCtx {
             xfa_out: Default::default(),
             xfa_datasets: None,
             xfa_ran_away: false,
+            xfa_deps: Arc::default(),
             xfa_removed: Vec::new(),
             pages: 0,
             date: now.map(pdfcraft_cos::pdf_date),
@@ -2438,7 +2444,8 @@ fn run_edit(doc: &mut pdfcraft_cos::Document, edit: &Edit, cx: &mut EditCtx) -> 
         },
         Edit::XfaEvent { som, activity } => {
             let tpl = cx.xfa.clone().ok_or_else(|| EditError::Invalid("this is not a laid-out XFA form, or JavaScript is off".into()))?;
-            let mut run = xfa::XfaRun { page_count: cx.pages, out: &mut cx.xfa_out, datasets: cx.xfa_datasets, ran_away: false };
+            let mut deps = cx.xfa_deps.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut run = xfa::XfaRun { page_count: cx.pages, out: &mut cx.xfa_out, datasets: cx.xfa_datasets, ran_away: false, deps: &mut deps };
             let ran = xfa::on_event(doc, &tpl, som, activity, &mut run);
             cx.xfa_datasets = run.datasets;
             cx.xfa_ran_away |= run.ran_away;
@@ -3177,7 +3184,8 @@ fn image_content_type(bytes: &[u8]) -> Option<&'static str> {
 /// fields take the data's values.
 fn xfa_after_data_change(doc: &mut pdfcraft_cos::Document, cx: &mut EditCtx, calculate: bool) -> Result<(), EditError> {
     if let Some(tpl) = cx.xfa.clone() {
-        let mut run = xfa::XfaRun { page_count: cx.pages, out: &mut cx.xfa_out, datasets: cx.xfa_datasets, ran_away: false };
+        let mut deps = cx.xfa_deps.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut run = xfa::XfaRun { page_count: cx.pages, out: &mut cx.xfa_out, datasets: cx.xfa_datasets, ran_away: false, deps: &mut deps };
         let r = guard(|| xfa::on_data_replaced(doc, &tpl, calculate, &mut run))
             .unwrap_or_else(|m| Err(format!("laying the form out again failed unexpectedly ({m})")));
         cx.xfa_datasets = run.datasets;
@@ -3456,6 +3464,7 @@ impl Session {
         // Acrobat; what they change is one more revision, still nothing to save.
         let mut script_output = js::JsOutput::default();
         let mut ran_away = false;
+        let mut calc_deps = xfa::CalcDeps::default();
         let xfa_template = match (&xfa, &cos) {
             (Some(_), Ok(Ok(c))) => xfa::template(c),
             _ => None,
@@ -3466,7 +3475,8 @@ impl Session {
                     let mut work = cos.clone();
                     let pages = info.pages.len();
                     let ran = guard(|| {
-                        let mut run = xfa::XfaRun { page_count: pages, out: &mut script_output, datasets: None, ran_away: false };
+                        let mut run =
+                            xfa::XfaRun { page_count: pages, out: &mut script_output, datasets: None, ran_away: false, deps: &mut calc_deps };
                         let changes = xfa::on_open(&mut work, &tpl, &mut run);
                         if run.ran_away {
                             ran_away = true;
@@ -3532,6 +3542,7 @@ impl Session {
         let mut document = Self::build_document(&context.trust, name, path, bytes, info, cos, render_password, password, xfa);
         // A script that ran away on open turns the form's scripts off for this document.
         document.xfa_template = if ran_away { None } else { xfa_template };
+        document.xfa_calc_deps = Arc::new(std::sync::Mutex::new(calc_deps));
         document.js_output.append(script_output);
         if ran_away {
             document.xfa_scripts_off = true;
@@ -3624,6 +3635,7 @@ impl Session {
             js_output: Default::default(),
             xfa,
             xfa_template: None,
+            xfa_calc_deps: Arc::default(),
             xfa_scripts_off: false,
             fonts_stale: false,
             xfa_warnings: Vec::new(),
@@ -3647,6 +3659,7 @@ impl Session {
         let mut cx = EditCtx::new(now, doc.generation ^ (id.0 << 48));
         if !js_off {
             cx.xfa = doc.xfa_template.clone();
+            cx.xfa_deps = doc.xfa_calc_deps.clone();
         }
         cx.pages = doc.info.pages.len();
         cx.today = today;
@@ -3722,7 +3735,7 @@ impl Session {
             _ => edit.label(),
         };
         // An XFA form's scripts answer the change: exit and validate scripts of the field, then
-        // every calculation (and a reset recalculates). They read the data, so it is brought up
+        // the calculations that read what changed (a reset recalculates them all). They read the data, so it is brought up
         // to date first.
         if let Some(tpl) = cx.xfa.clone() {
             if is_xfa && matches!(scope_of(&edit), Scope::Form | Scope::Full | Scope::Content) {
@@ -3744,10 +3757,11 @@ impl Session {
             let mut reset = false;
             collect(&edit, &mut changed, &mut reset);
             if !changed.is_empty() || reset {
-                let mut run = xfa::XfaRun { page_count: cx.pages, out: &mut cx.xfa_out, datasets: cx.xfa_datasets, ran_away: false };
-                // Every changed field's scripts, then the calculations once (after a reset,
-                // only those).
-                let ran = guard(|| xfa::on_changes(&mut next, &tpl, &changed, &mut run))
+                let mut deps = cx.xfa_deps.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                let mut run = xfa::XfaRun { page_count: cx.pages, out: &mut cx.xfa_out, datasets: cx.xfa_datasets, ran_away: false, deps: &mut deps };
+                // Every changed field's scripts, then the calculations that read what changed
+                // (every one after a reset).
+                let ran = guard(|| xfa::on_changes(&mut next, &tpl, &changed, reset, &mut run))
                     .unwrap_or_else(|m| Err(format!("the form's scripts failed unexpectedly ({m})")));
                 cx.xfa_datasets = run.datasets;
                 cx.xfa_ran_away |= run.ran_away;

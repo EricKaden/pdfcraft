@@ -849,6 +849,7 @@ impl Interp<'_> {
 
     /// A node's value as a FormCalc value.
     fn node_value(&self, i: usize) -> Val {
+        self.h.read(i);
         let Some(n) = self.node(i) else { return Val::Null };
         if n.value.is_empty() {
             return Val::Null;
@@ -940,7 +941,10 @@ impl Interp<'_> {
     fn is_null(&self, v: &Val) -> bool {
         match v {
             Val::Null => true,
-            Val::Node(i) => self.node(*i).is_none_or(|n| n.value.is_empty()),
+            Val::Node(i) => {
+                self.h.read(*i);
+                self.node(*i).is_none_or(|n| n.value.is_empty())
+            }
             Val::List(items) => items.is_empty(),
             _ => false,
         }
@@ -1107,7 +1111,10 @@ impl Interp<'_> {
             "index" | "instanceIndex" => Val::Num(n.index as f64),
             "presence" => Val::Str(n.presence.clone()),
             "access" => Val::Str(n.access.clone()),
-            "isNull" => Val::Num(if n.value.is_empty() { 1.0 } else { 0.0 }),
+            "isNull" => {
+                self.h.read(i);
+                Val::Num(if n.value.is_empty() { 1.0 } else { 0.0 })
+            }
             "mandatory" => Val::Str("disabled".into()),
             "parent" => n.parent.map_or(Val::Null, Val::Node),
             "nodes" => Val::List(n.children.iter().copied().filter(|c| self.node(*c).is_some()).map(Val::Node).collect()),
@@ -2088,7 +2095,10 @@ impl Interp<'_> {
                 // Non-null values and objects: an empty field doesn't count, a subform does.
                 let vals = self.arg_values_keeping(args, true)?;
                 let counts = |v: &Val| match v {
-                    Val::Node(i) => self.node(*i).is_some_and(|n| !matches!(n.kind, XfaKind::Field | XfaKind::ExclGroup) || !n.value.is_empty()),
+                    Val::Node(i) => {
+                        self.h.read(*i);
+                        self.node(*i).is_some_and(|n| !matches!(n.kind, XfaKind::Field | XfaKind::ExclGroup) || !n.value.is_empty())
+                    }
                     other => !self.is_null(other),
                 };
                 Val::Num(vals.iter().filter(|v| counts(v)).count() as f64)
@@ -2565,6 +2575,7 @@ pub(crate) fn run_formcalc_at(
         }
         Err(e) => out.error = Some(e),
     }
+    (out.reads, out.reads_cut) = host.take_reads();
     out.notes = host.notes();
     out.effects = host.effects;
     out.console = host.console;

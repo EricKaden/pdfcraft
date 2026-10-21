@@ -5,7 +5,7 @@
 //! presence and access changes become overrides kept in the PDF, added or removed rows change
 //! the datasets, and any of those lays the form out again.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use pdfcraft_js::xfa::{XfaDoc, XfaEffect, XfaEvent, XfaKind, XfaNode};
@@ -20,6 +20,12 @@ use crate::js::Request;
 const MAX_SCRIPTS_PER_EVENT: usize = 2_000;
 /// Most times the form is laid out again for one event (a script adding rows in a loop).
 const MAX_RELAYOUTS_PER_EVENT: usize = 50;
+/// Most runs of one calculation in one event: calculations that keep changing what the other
+/// reads stop there.
+const MAX_RUNS_PER_CALCULATION: usize = 16;
+/// Most calculations whose reads a document keeps: a form that keeps adding rows starts over
+/// past it, and every calculation runs once more, as on opening.
+const MAX_RECORDED_CALCULATIONS: usize = 50_000;
 /// Most message boxes, console lines and errors kept for one event.
 const MAX_ALERTS_PER_EVENT: usize = 100;
 const MAX_CONSOLE_PER_EVENT: usize = 1_000;
@@ -127,6 +133,59 @@ pub(crate) struct XfaRun<'a> {
     pub datasets: Option<pdfcraft_cos::ObjRef>,
     /// A script ran past its time limit and was abandoned: the form's scripts should stay off.
     pub ran_away: bool,
+    /// What each calculation read when it last ran, kept for the document's life.
+    pub deps: &'a mut CalcDeps,
+}
+
+/// What each calculation read when it last ran (XFA dependency tracking), kept for the
+/// document's life: after a change, only the calculations that read what changed run again.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct CalcDeps {
+    /// By calculation (the SOM of its field): the fields it read.
+    reads: HashMap<String, Vec<String>>,
+    /// By field: the calculations that read it.
+    readers: HashMap<String, HashSet<String>>,
+    /// Calculations that read more values than one run's log holds: any change concerns them.
+    wide: HashSet<String>,
+}
+
+impl CalcDeps {
+    /// Record what the calculation of field `calc` read when it ran (`cut`: more than the log
+    /// of one run holds).
+    fn record(&mut self, calc: &str, reads: Vec<String>, cut: bool) {
+        if let Some(old) = self.reads.remove(calc) {
+            for field in old {
+                if let Some(set) = self.readers.get_mut(&field) {
+                    set.remove(calc);
+                    if set.is_empty() {
+                        self.readers.remove(&field);
+                    }
+                }
+            }
+        }
+        if self.reads.len() >= MAX_RECORDED_CALCULATIONS {
+            *self = CalcDeps::default();
+        }
+        if cut {
+            self.wide.insert(calc.to_string());
+        } else {
+            self.wide.remove(calc);
+        }
+        for field in &reads {
+            self.readers.entry(field.clone()).or_default().insert(calc.to_string());
+        }
+        self.reads.insert(calc.to_string(), reads);
+    }
+
+    /// Whether the calculation of field `calc` has run, so that what it reads is known.
+    fn knows(&self, calc: &str) -> bool {
+        self.reads.contains_key(calc)
+    }
+
+    /// The calculations that read `field`, and those that read too much to tell.
+    fn readers_of(&self, field: &str) -> Vec<String> {
+        self.readers.get(field).into_iter().flatten().chain(self.wide.iter()).cloned().collect()
+    }
 }
 
 fn to_js(n: &FormNode) -> XfaNode {
@@ -268,6 +327,14 @@ struct Runner<'a, 'b> {
     /// rebuilt when the structure changed).
     session: Option<XfaSession>,
     changes: Changes,
+    /// Calculations to run, by the SOM of their field: their inputs changed.
+    due: HashSet<String>,
+    /// Every calculation is due (on opening, after rows were added or removed, a reset).
+    all_due: bool,
+    /// Runs of each calculation in this event, against [`MAX_RUNS_PER_CALCULATION`].
+    calc_runs: HashMap<String, usize>,
+    /// A calculation reached [`MAX_RUNS_PER_CALCULATION`] (reported once).
+    calc_capped: bool,
 }
 
 impl<'a, 'b> Runner<'a, 'b> {
@@ -296,6 +363,29 @@ impl<'a, 'b> Runner<'a, 'b> {
             cached: None,
             session: None,
             changes: Changes::default(),
+            due: HashSet::new(),
+            all_due: false,
+            calc_runs: HashMap::new(),
+            calc_capped: false,
+        }
+    }
+
+    /// The field at `som` was given a value by the script of `by` (`None`: by the user). The
+    /// calculations that read it are due, and so is the field's own calculation when anything
+    /// else wrote it (another viewer runs it again then). A calculation's write wakes nobody
+    /// when it changed nothing, so calculations that agree don't keep waking each other.
+    fn wrote(&mut self, som: &str, by: Option<&ScriptEvent>, changed: bool) {
+        if by.is_some_and(|e| e.activity == "calculate") && !changed {
+            return;
+        }
+        let writer = by.map(|e| e.som.as_str());
+        if writer != Some(som) {
+            self.due.insert(som.to_string());
+        }
+        for calc in self.run.deps.readers_of(som) {
+            if writer != Some(calc.as_str()) {
+                self.due.insert(calc);
+            }
         }
     }
 
@@ -585,7 +675,8 @@ impl<'a, 'b> Runner<'a, 'b> {
             }
             match e {
                 XfaEffect::SetValue { som, value } => {
-                    self.set_value(som, value);
+                    let changed = self.set_value(som, value);
+                    self.wrote(som, Some(ev), changed);
                 }
                 XfaEffect::SetPresence { som, presence } => {
                     if self.ov.presence.insert(som.clone(), presence.clone()).as_ref() != Some(presence) {
@@ -619,10 +710,14 @@ impl<'a, 'b> Runner<'a, 'b> {
                         self.data_op(pdfcraft_xfa::DataOp::Remove(path));
                     }
                     self.changes.rows += 1;
+                    self.all_due = true;
                     relayout = true;
                 }
                 XfaEffect::MessageBox(m) => self.alert(m.clone()),
-                XfaEffect::ResetData(names) => self.reset(names)?,
+                XfaEffect::ResetData(names) => {
+                    self.reset(names)?;
+                    self.all_due = true;
+                }
                 XfaEffect::Print => self.run.out.requests.push(Request::Print),
                 XfaEffect::SaveAs => self.run.out.requests.push(Request::SaveAs),
                 XfaEffect::LaunchUrl(u) => self.run.out.requests.push(Request::LaunchUrl(u.clone())),
@@ -632,7 +727,7 @@ impl<'a, 'b> Runner<'a, 'b> {
                     }
                 }
                 XfaEffect::Beep => self.run.out.requests.push(Request::Beep),
-                XfaEffect::Recalculate => {}
+                XfaEffect::Recalculate => self.all_due = true,
                 XfaEffect::Relayout => relayout = true,
             }
         }
@@ -679,20 +774,57 @@ impl<'a, 'b> Runner<'a, 'b> {
         Ok(Some(o))
     }
 
-    /// Every calculate script, in document order: the field takes the script's result unless
-    /// the script set a value itself.
+    /// The calculations that are due, in document order, round after round until none is:
+    /// every one when all are due, else those whose inputs changed and any that never ran. One
+    /// that keeps being woken stops after [`MAX_RUNS_PER_CALCULATION`] runs in the event. The
+    /// field takes a script's result unless the script set a value itself.
     fn calculates(&mut self) -> Result<(), String> {
-        let events: Vec<ScriptEvent> = self.live().events.iter().filter(|e| e.activity == "calculate").cloned().collect();
-        for ev in &events {
-            let Some(o) = self.run(ev, "")? else { continue };
-            if o.error.is_some() || o.effects.iter().any(|e| matches!(e, XfaEffect::SetValue { som, .. } if *som == ev.som)) {
-                continue;
+        loop {
+            let calcs: Vec<ScriptEvent> = self.live().events.iter().filter(|e| e.activity == "calculate").cloned().collect();
+            let all = std::mem::take(&mut self.all_due);
+            let mut due = Vec::new();
+            for ev in calcs {
+                if !(all || self.due.contains(&ev.som) || !self.run.deps.knows(&ev.som)) {
+                    continue;
+                }
+                if self.calc_runs.get(&ev.som).copied().unwrap_or(0) >= MAX_RUNS_PER_CALCULATION {
+                    self.due.remove(&ev.som);
+                    if !self.calc_capped {
+                        self.calc_capped = true;
+                        self.error(format!(
+                            "{} (calculate): the form's calculations kept changing each other; it stopped after {MAX_RUNS_PER_CALCULATION} runs",
+                            ev.som
+                        ));
+                    }
+                    continue;
+                }
+                due.push(ev);
             }
-            if let Some(result) = o.result {
-                self.set_value(&ev.som, &result);
+            if due.is_empty() {
+                return Ok(());
+            }
+            let mut spent = false;
+            for ev in &due {
+                // Woken again while it waited in this round: it runs now, once.
+                self.due.remove(&ev.som);
+                *self.calc_runs.entry(ev.som.clone()).or_insert(0) += 1;
+                let Some(mut o) = self.run(ev, "")? else {
+                    spent = true;
+                    continue;
+                };
+                self.run.deps.record(&ev.som, std::mem::take(&mut o.reads), o.reads_cut);
+                if o.error.is_some() || o.effects.iter().any(|e| matches!(e, XfaEffect::SetValue { som, .. } if *som == ev.som)) {
+                    continue;
+                }
+                if let Some(result) = o.result {
+                    let changed = self.set_value(&ev.som, &result);
+                    self.wrote(&ev.som, Some(ev), changed);
+                }
+            }
+            if spent {
+                return Ok(());
             }
         }
-        Ok(())
     }
 
     fn events_of(&mut self, som: &str, activity: &str) -> Vec<ScriptEvent> {
@@ -764,26 +896,30 @@ fn collect_fields(n: &FormNode, out: &mut Vec<(String, String, String, String)>,
     }
 }
 
-/// On open: initialize scripts, then calculations. Returns what they changed.
+/// On open: initialize scripts, then every calculation (and those that what they wrote made
+/// due). Returns what they changed.
 pub(crate) fn on_open(doc: &mut pdfcraft_cos::Document, tpl: &Template, run: &mut XfaRun) -> Result<Changes, String> {
     let mut r = Runner::new(doc, tpl, run, OPEN_BUDGET_MS);
     let events: Vec<ScriptEvent> = r.live().events.iter().filter(|e| e.activity == "initialize" || e.activity == "docReady").cloned().collect();
     for ev in &events {
         r.run(ev, "")?;
     }
+    r.all_due = true;
     r.calculates()?;
     r.finish()
 }
 
 /// After fields `names` took new values: each one's change, exit and validate scripts, then
-/// the calculations once (or only those, after a reset). A validate script that answers false,
-/// or fails, shows its message; the value stays, as Acrobat marks the field invalid rather
-/// than reverting it.
-pub(crate) fn on_changes(doc: &mut pdfcraft_cos::Document, tpl: &Template, names: &[String], run: &mut XfaRun) -> Result<(), String> {
+/// the calculations that read what changed (every one after a `reset`). A validate script
+/// that answers false, or fails, shows its message; the value stays, as Acrobat marks the
+/// field invalid rather than reverting it.
+pub(crate) fn on_changes(doc: &mut pdfcraft_cos::Document, tpl: &Template, names: &[String], reset: bool, run: &mut XfaRun) -> Result<(), String> {
     let mut r = Runner::new(doc, tpl, run, OPEN_BUDGET_MS);
+    r.all_due = reset;
     for name in names {
         let som = r.by_som().iter().find(|(_, f)| *f == name).map(|(s, _)| s.clone());
         let Some(som) = som else { continue };
+        r.wrote(&som, None, true);
         let value = r.fields().get(name).map(|f| f.value.join("\n")).unwrap_or_default();
         for ev in r.events_of(&som, "change").into_iter().chain(r.events_of(&som, "exit")) {
             r.run(&ev, &value)?;
@@ -805,12 +941,14 @@ pub(crate) fn on_data_replaced(doc: &mut pdfcraft_cos::Document, tpl: &Template,
     let mut r = Runner::new(doc, tpl, run, OPEN_BUDGET_MS);
     r.relayout()?;
     if calculate {
+        r.all_due = true;
         r.calculates()?;
     }
     r.finish().map(|_| ())
 }
 
-/// A button's click script (or any event, by SOM path and activity), then calculations.
+/// A button's click script (or any event, by SOM path and activity), then the calculations
+/// that read what it changed.
 pub(crate) fn on_event(doc: &mut pdfcraft_cos::Document, tpl: &Template, som: &str, activity: &str, run: &mut XfaRun) -> Result<(), String> {
     let mut r = Runner::new(doc, tpl, run, EVENT_BUDGET_MS);
     let events = r.events_of(som, activity);

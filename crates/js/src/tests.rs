@@ -395,6 +395,21 @@ mod xfa_model {
         assert_eq!(o.effects, vec![XfaEffect::SetValue { som: "form1[0].page1[0].total[0]".into(), value: "5".into() }]);
     }
 
+    /// A script reports the fields whose value it read, once each in the order first read, and
+    /// not the ones it only wrote or the objects that hold no value: a calculation's
+    /// dependencies.
+    #[test]
+    fn a_script_reports_the_values_it_read_not_the_ones_it_wrote() {
+        let o = go(
+            "qty.rawValue; this.parent.price.formattedValue; qty.isNull; this.rawValue = 1; xfa.resolveNode('form1.page1.details').presence; '' + qty",
+            "form1[0].page1[0].total[0]",
+            "calculate",
+        );
+        assert_eq!(o.error, None, "{o:?}");
+        assert_eq!(o.reads, ["form1[0].page1[0].qty[0]", "form1[0].page1[0].price[0]"]);
+        assert!(!o.reads_cut);
+    }
+
     #[test]
     fn long_values_and_results_are_cut_where_they_are_stored() {
         // The value kept for later reads is the one the effect saves.
@@ -605,6 +620,14 @@ mod formcalc {
         let o = go(script, "form1[0].page1[0].total[0]", "calculate");
         assert_eq!(o.error, None, "{script}");
         o.result.unwrap_or_default()
+    }
+
+    /// FormCalc reports the values it read too, by reference, function argument or `isNull`.
+    #[test]
+    fn formcalc_reports_the_values_it_read() {
+        let o = go("Sum(qty, price) + total.isNull", "form1[0].page1[0].go[0]", "calculate");
+        assert_eq!(o.error, None, "{o:?}");
+        assert_eq!(o.reads, ["form1[0].page1[0].qty[0]", "form1[0].page1[0].price[0]", "form1[0].page1[0].total[0]"]);
     }
 
     #[test]
