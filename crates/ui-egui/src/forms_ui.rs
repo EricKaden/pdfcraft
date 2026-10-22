@@ -899,6 +899,8 @@ fn choice_list(
     let resp = egui::Area::new(egui::Id::new(("form-choices", view))).order(egui::Order::Foreground).fixed_pos(rect.left_bottom()).show(ctx, |ui| {
         let (outer, area) = ui.allocate_exact_size(vec2(width, shown as f32 * row + 2.0), egui::Sense::hover());
         let p = ui.painter();
+        // The list is drawn as the form's own, a white list in the field's font with a blue
+        // highlight, in light and dark themes alike, so its colors are fixed, not the app's tokens.
         p.rect_filled(outer, CornerRadius::ZERO, Color32::WHITE);
         // The wheel scrolls the list, a row at a time, and not the page under it.
         if area.contains_pointer() && n > shown {

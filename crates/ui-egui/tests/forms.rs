@@ -1525,6 +1525,24 @@ fn the_mouse_wheel_scrolls_a_long_drop_down_list_and_not_the_page() {
     assert_eq!(h.state().views[0].page_screen_rect(0), page, "the page stayed where it was");
 }
 
+/// Escape in an open drop-down closes its list and nothing else: the find bar, which Escape
+/// closes when no field is open, stays open.
+#[test]
+fn escape_closes_an_open_drop_downs_list_and_leaves_the_page_alone() {
+    let mut h = harness();
+    long_country(&mut h);
+    h.state_mut().views[0].open_find();
+    h.run_steps(3);
+    assert!(h.state().views[0].find.is_some());
+    click_field(&mut h, "country", 0);
+    assert!(egui_kittest::kittest::Queryable::query_by_label(&h, "0000").is_some(), "the list is open");
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
+    assert!(egui_kittest::kittest::Queryable::query_by_label(&h, "0000").is_none(), "Escape closed the list");
+    assert!(h.state().views[0].forms.focus.is_none(), "and the field");
+    assert!(h.state().views[0].find.is_some(), "the find bar stays open");
+}
+
 /// An auto-sized drop-down's list draws its items at the size the field shows its value at, so a
 /// long chosen item fits the list as it fits the field instead of growing past it.
 #[test]
