@@ -2530,8 +2530,9 @@ pub fn shortcuts(view: &mut DocView, ctx: &egui::Context, speed: crate::scroll_s
         }
     }
     // An open form field takes the arrows, Page Up / Page Down, Home and End (a drop-down's or a
-    // list box's items), so the page under it stays put.
-    if view.forms.focus.is_some() {
+    // list box's items), so the page under it stays put. A focused check box or radio button
+    // uses none of them, so the page keys still work there.
+    if view.forms.focus.is_some() && form_box.is_none() {
         return;
     }
     if key(Key::Home) {
