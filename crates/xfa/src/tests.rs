@@ -339,6 +339,18 @@ fn a_hang_wider_than_the_box_keeps_every_line_inside_it() {
     }
 }
 
+/// A label without a width that hangs its first line is as wide as that line is laid out: the
+/// hang takes back the left margin the first line doesn't use, so right-aligned text starts at
+/// the label's x.
+#[test]
+fn a_label_without_a_width_measures_its_hanging_indent_as_it_is_laid_out() {
+    let items = positioned(
+        r#"<draw name="a" x="1in" y="0"><value><text>11. BALANCE</text></value><font typeface="Arial" size="8pt"/><para hAlign="right" marginLeft="18pt" textIndent="-18pt"/></draw>"#,
+    );
+    let span = items.iter().find_map(|i| if let Item::Text(s) = i { Some(s) } else { None }).expect("the text");
+    assert!((span.x - (36.0 + 72.0)).abs() < 0.05, "starts at its x: {}", span.x);
+}
+
 #[test]
 fn tables_break_across_pages_and_repeat_their_header_row() {
     let form = layout_xml(&template(40)).unwrap();

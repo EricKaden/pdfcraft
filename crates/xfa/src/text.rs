@@ -217,9 +217,7 @@ pub fn layout(rich: &RichText, rect: Rect, para: &Para, base: &Face, embed: &dyn
     // never starts left of the box, so the others move in to make room, as other viewers lay
     // such labels out; never past the box's right edge, however wide the hang.
     let hang = (-para.text_indent).min((rect.w - para.margin_right - 1.0).max(0.0));
-    let margin_left = para.margin_left.max(hang);
-    // Where the first line starts, from the others.
-    let first_indent = para.text_indent.max(-margin_left);
+    let (margin_left, first_indent) = indents(para, hang);
     let avail = (rect.w - margin_left - para.margin_right).max(1.0);
     let mut lines: Vec<(Line, Option<HAlign>)> = Vec::new();
     let mut total = 0.0;
@@ -328,9 +326,19 @@ pub fn layout(rich: &RichText, rect: Rect, para: &Para, base: &Face, embed: &dyn
 /// The width `rich` takes with no line wrapped (its longest paragraph, with the paragraph's
 /// margins and first-line indent): how wide a box without an explicit width grows.
 pub fn natural_width(rich: &RichText, para: &Para, base: &Face, embed: &dyn Fn(&str) -> String) -> f64 {
-    let indent = para.text_indent.max(0.0);
+    // Unwrapped, every line is a paragraph's first line; the hang is as wide as asked, since the
+    // box will be as wide as this.
+    let (margin_left, first_indent) = indents(para, -para.text_indent);
     let widest = rich.paragraphs.iter().map(|p| words(&p.runs, base, embed).iter().map(|w| w.width).sum::<f64>()).fold(0.0, f64::max);
-    (para.margin_left + indent + widest + para.margin_right).max(0.0)
+    (margin_left + first_indent + widest + para.margin_right).max(0.0)
+}
+
+/// The left margin of a paragraph's lines and where its first line starts from them, for a
+/// hanging indent of `hang` (the negative textIndent, as far as the box allows): the first line
+/// never starts left of the box, so the other lines move in to make room.
+fn indents(para: &Para, hang: f64) -> (f64, f64) {
+    let margin_left = para.margin_left.max(hang);
+    (margin_left, para.text_indent.max(-margin_left))
 }
 
 /// Height `rich` needs at `width` (for boxes without an explicit height).
