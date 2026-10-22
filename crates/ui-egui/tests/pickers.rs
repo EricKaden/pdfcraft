@@ -855,10 +855,12 @@ fn a_background_startup_forms_script_notice_waits_until_its_tab_is_selected() {
 /// print, a save, a message) wait for its tab.
 #[test]
 fn a_background_forms_highlight_request_applies_at_once() {
-    let h = harness(&[3]);
-    assert!(!h.state().view_defaults.highlight_fields);
+    let mut h = harness(&[3]);
+    // Highlighting is on by default: start from a user who turned it off.
+    h.state_mut().view_defaults.highlight_fields = false;
+    h.state_mut().views[0].highlight_fields = false;
+    h.run_steps(1);
     deliver_startup(&h, "late-form.pdf", pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::layout_ready_template()));
-    let mut h = h;
     h.run_steps(2);
     assert_eq!(h.state().active, Some(0), "it opened behind the current document");
     assert!(h.state().views[1].highlight_fields, "the background form is highlighted");
