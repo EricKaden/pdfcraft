@@ -1338,13 +1338,16 @@ fn mode_tabs_keep_the_hand_over_a_text_field_scrolled_under_them() {
     assert_eq!(h.state().mode, pdfcraft_ui_egui::Mode::Convert, "the tab takes the click, not the field's editor");
 }
 
-/// A page with a push button `go`, and two attached files: a one-page PDF filed under the key
-/// `Guide.pdf` (its own file name `inner.pdf`), and `notes.txt`.
-fn guide_fixture() -> Vec<u8> {
-    let inner = "%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n\
+/// The one-page PDF `guide_fixture` attaches as `Guide.pdf`.
+const GUIDE_INNER: &str = "%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n\
                  3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] >> endobj\ntrailer << /Root 1 0 R >>\n%%EOF";
+
+/// A page with a push button `go`, and three attached files: a one-page PDF filed under the key
+/// `Guide.pdf` (its own file name `inner.pdf`), `notes.txt`, and `fake.pdf`, which holds text.
+fn guide_fixture() -> Vec<u8> {
+    let inner = GUIDE_INNER;
     let objs = [
-        "<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [4 0 R] >> /Names << /EmbeddedFiles << /Names [(Guide.pdf) 5 0 R (notes.txt) 7 0 R] >> >> >>".to_string(),
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [4 0 R] >> /Names << /EmbeddedFiles << /Names [(Guide.pdf) 5 0 R (fake.pdf) 9 0 R (notes.txt) 7 0 R] >> >> >>".to_string(),
         "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
         "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Annots [4 0 R] >>".into(),
         "<< /Type /Annot /Subtype /Widget /FT /Btn /Ff 65536 /T (go) /Rect [20 20 120 50] /P 3 0 R >>".into(),
@@ -1352,6 +1355,8 @@ fn guide_fixture() -> Vec<u8> {
         format!("<< /Type /EmbeddedFile /Length {} >>\nstream\n{inner}\nendstream", inner.len()),
         "<< /Type /Filespec /F (notes.txt) /UF (notes.txt) /EF << /F 8 0 R >> >>".into(),
         "<< /Type /EmbeddedFile /Length 5 >>\nstream\nhello\nendstream".into(),
+        "<< /Type /Filespec /F (fake.pdf) /UF (fake.pdf) /EF << /F 10 0 R >> >>".into(),
+        "<< /Type /EmbeddedFile /Length 12 >>\nstream\nnot a PDF at\nendstream".into(),
     ];
     let mut out = b"%PDF-1.7\n".to_vec();
     let mut offs = Vec::new();
@@ -1366,6 +1371,45 @@ fn guide_fixture() -> Vec<u8> {
     }
     out.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{x}\n%%EOF\n", objs.len() + 1).as_bytes());
     out
+}
+
+/// An attachment opens in a tab only when its bytes are a PDF, whatever its name says: a
+/// `fake.pdf` holding text is offered to save instead. A request goes back to the tab opened from
+/// that attachment, and not to another open PDF of the same name whose bytes start with it.
+#[test]
+fn a_form_button_opens_only_a_real_pdf_and_returns_to_the_tab_it_opened() {
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(|_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("form.pdf", None, guide_fixture()).unwrap();
+        // Another document named like the attachment, its bytes the attachment's and an update.
+        app.open_bytes("inner.pdf", None, format!("{GUIDE_INNER}\n% updated later\n").into_bytes()).unwrap();
+        app.active = Some(0);
+        app
+    });
+    h.run_steps(4);
+    let tabs = |h: &Harness<'static, PdfCraftApp>| h.state().views.len();
+    let id = h.state().views[0].id;
+    // A text file named .pdf is offered to save, not opened.
+    let saved = std::env::temp_dir().join(format!("pdfcraft-fake-{}.pdf", std::process::id()));
+    let _ = std::fs::remove_file(&saved);
+    h.state_mut().pick_override = Some(vec![saved.to_string_lossy().into_owned()]);
+    h.state_mut().run_button_script(id, "go", "this.exportDataObject({cName: 'fake.pdf', nLaunch: 2});");
+    h.run_steps(6);
+    assert_eq!(tabs(&h), 2, "no tab for a file that isn't a PDF: {:?}", h.state().toast);
+    assert_eq!(std::fs::read(&saved).ok().as_deref(), Some(&b"not a PDF at"[..]), "offered to save instead");
+    let _ = std::fs::remove_file(&saved);
+    // The real attached PDF opens in a tab of its own, though another inner.pdf starts with it.
+    h.state_mut().active = Some(0);
+    h.state_mut().run_button_script(id, "go", "this.exportDataObject({cName: 'Guide.pdf', nLaunch: 2});");
+    h.run_steps(4);
+    assert_eq!(tabs(&h), 3, "a tab of its own");
+    assert_eq!(h.state().active, Some(2));
+    // Asked again, it goes back to the tab it opened.
+    h.state_mut().active = Some(0);
+    h.state_mut().run_button_script(id, "go", "this.exportDataObject({cName: 'Guide.pdf', nLaunch: 2});");
+    h.run_steps(4);
+    assert_eq!((tabs(&h), h.state().active), (3, Some(2)), "the tab it opened, not the other inner.pdf");
 }
 
 /// A button script's `exportDataObject` opens the attached PDF in a new tab, goes back to that

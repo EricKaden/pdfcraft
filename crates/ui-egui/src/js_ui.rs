@@ -89,8 +89,8 @@ impl PdfCraftApp {
             self.notify_fmt("The form asks for the attached file {name}, which this document doesn't have.", &[("name", &shown)]);
             return;
         };
-        let pdf = doc.info.attachments.get(i).is_some_and(|a| a.name.to_ascii_lowercase().ends_with(".pdf"));
-        self.attachment_action(id, i, open && pdf);
+        // Whether it is a PDF is decided by its bytes, not its name (`attachment_action`).
+        self.attachment_action(id, i, open);
     }
 
     /// Run a push button's JavaScript (its Mouse Up action).

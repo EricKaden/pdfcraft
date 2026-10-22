@@ -579,7 +579,7 @@ fn launch_url(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsVa
 
 /// The attached file `exportDataObject` names, and whether to open it: from an object
 /// (`{cName, nLaunch}`) or from the arguments (`cName, cDIPath, bAllowAuth, nLaunch`). `nLaunch`
-/// 1 and 2 open the file, 0 (the default) saves it.
+/// 1 and 2 open the file; 0 (the default) and any other value save it.
 pub(crate) fn data_object(args: &[JsValue], ctx: &mut Context) -> JsResult<(String, bool)> {
     let first = arg(args, 0);
     let name = message(&first, "cName", ctx)?;
@@ -591,7 +591,7 @@ pub(crate) fn data_object(args: &[JsValue], ctx: &mut Context) -> JsResult<(Stri
         _ => arg(args, 3),
     };
     let launch = if launch.is_undefined() || launch.is_null() { 0.0 } else { launch.to_number(ctx)? };
-    Ok((name, launch.is_finite() && launch >= 1.0))
+    Ok((name, launch == 1.0 || launch == 2.0))
 }
 
 /// `this.exportDataObject(…)`: asks the viewer to open or save an attached file.

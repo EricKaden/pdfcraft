@@ -1279,6 +1279,16 @@ mod data_objects {
         assert!(o.requests.is_empty());
     }
 
+    /// Only `nLaunch` 1 and 2 open the file: other values (1.5, 3, a huge number) save it, as the
+    /// default 0 does.
+    #[test]
+    fn export_data_object_opens_only_for_n_launch_1_and_2() {
+        for launch in ["1.5", "3", "1e9", "-1"] {
+            let o = go(&format!("this.exportDataObject({{cName: 'Guide.pdf', nLaunch: {launch}}});"), &Event::field("Mouse Up", "total", ""));
+            assert_eq!(o.requests, [Request::OpenAttachment { name: "Guide.pdf".into(), open: false }], "nLaunch {launch}");
+        }
+    }
+
     /// In an XFA script `event.target` is the document, so `exportDataObject` works on it, while
     /// `xfa.event.target` is still the node the event happened on.
     #[test]
