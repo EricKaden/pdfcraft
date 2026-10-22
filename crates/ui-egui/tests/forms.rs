@@ -1525,6 +1525,73 @@ fn the_mouse_wheel_scrolls_a_long_drop_down_list_and_not_the_page() {
     assert_eq!(h.state().views[0].page_screen_rect(0), page, "the page stayed where it was");
 }
 
+/// An auto-sized drop-down's list draws its items at the size the field shows its value at, so a
+/// long chosen item fits the list as it fits the field instead of growing past it.
+#[test]
+fn an_auto_sized_drop_downs_list_shows_its_items_at_the_fields_text_size() {
+    let mut h = harness();
+    let long = "The Commonwealth of the Northern Mariana Islands";
+    assert!(h.state_mut().apply_edit(pdfcraft_engine::Edit::SetFieldProps {
+        name: "country".into(),
+        props: Box::new(pdfcraft_engine::FieldProps { options: Some(vec!["Canada".into(), long.into()]), ..Default::default() }),
+    }));
+    assert!(
+        h.state_mut().apply_edit(pdfcraft_engine::Edit::SetFieldValue {
+            name: "country".into(),
+            value: pdfcraft_engine::FieldValue::Choice(vec![long.into()])
+        })
+    );
+    h.run_steps(3);
+    click_field(&mut h, "country", 0);
+    let field = field_rect(&h, "country");
+    let item = text_rect(&h, long).expect("the long item in the open list");
+    assert!(item.width() <= field.width(), "the item fits as the field's value does: {} wide in a {} field", item.width(), field.width());
+}
+
+/// In single-page view, where the wheel turns pages, the wheel over an open drop-down's list
+/// scrolls the list and leaves the page as it is; over the page itself it still turns it.
+#[test]
+fn in_single_page_view_the_wheel_over_an_open_list_scrolls_the_list_not_the_page() {
+    let mut h = harness();
+    long_country(&mut h);
+    assert!(h.state_mut().apply_edit(pdfcraft_engine::Edit::InsertBlankPage { at: 1, width: 300.0, height: 400.0 }));
+    h.state_mut().set_option("continuous", "off").unwrap();
+    h.key_press(egui::Key::Home);
+    for _ in 0..60 {
+        h.run_steps(2);
+        if !h.state().render_pending() && h.state().views[0].page_screen_rect(0).is_some() {
+            break;
+        }
+    }
+    let wheel = |h: &mut Harness<'static, PdfCraftApp>, at: egui::Pos2| {
+        h.hover_at(at);
+        h.run_steps(1);
+        for _ in 0..3 {
+            h.event(egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Line,
+                delta: egui::vec2(0.0, -1.0),
+                modifiers: egui::Modifiers::NONE,
+                phase: egui::TouchPhase::Move,
+            });
+            h.run_steps(2);
+        }
+        h.run_steps(6);
+    };
+    // The control: over the page, the wheel turns it.
+    let page = h.state().views[0].page_screen_rect(0).expect("page 1 on screen");
+    wheel(&mut h, page.center());
+    assert_eq!(h.state().views[0].current, 1, "over the page, the wheel turns it");
+    h.key_press(egui::Key::Home);
+    h.run_steps(6);
+    assert_eq!(h.state().views[0].current, 0);
+    // Over the open list, it scrolls the list instead.
+    click_field(&mut h, "country", 0);
+    let first = egui_kittest::kittest::Queryable::get_by_label(&h, "0000").rect();
+    wheel(&mut h, first.center() + egui::vec2(0.0, first.height() * 4.0));
+    assert!(egui_kittest::kittest::Queryable::query_by_label(&h, "0000").is_none(), "the list scrolled down");
+    assert_eq!(h.state().views[0].current, 0, "the page didn't turn");
+}
+
 /// With a page taller than the window and the pointer resting on an open drop-down's list,
 /// Home and the down arrow move through the list and leave the page where it was.
 #[test]

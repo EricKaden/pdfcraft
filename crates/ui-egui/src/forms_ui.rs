@@ -849,7 +849,10 @@ fn choice_list(
     let n = f.options.len();
     let shown = n.min(LIST_ROWS);
     let max_first = n.saturating_sub(shown);
-    let size = (field_text_size(&ctx.layer_painter(egui::LayerId::background()), f, w, "") * zoom).clamp(6.0, 48.0);
+    // Auto-sized text is fitted to what the field shows (its chosen item's shown name), so the
+    // list's items come out at the size the field's value is drawn at.
+    let value_text = f.value.first().map_or("", |v| f.options.iter().find(|(e, _)| e == v).map_or(v.as_str(), |(_, d)| d.as_str()));
+    let size = (field_text_size(&ctx.layer_painter(egui::LayerId::background()), f, w, value_text) * zoom).clamp(6.0, 48.0);
     let row = (size * 1.45).round().max(8.0);
     let bar = if n > shown { (row * 0.7).round().clamp(12.0, 22.0) } else { 0.0 };
     let width = rect.width().max(24.0 + bar);
