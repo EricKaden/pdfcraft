@@ -119,6 +119,12 @@ fn widget_at<'a>(xf: &PageXform, info: &DocInfo, page: usize, f: &'a FormField, 
         .map(|(i, w)| (f, i, w))
 }
 
+/// The field whose sign tab is under `p`, of `tabs` in the order they are painted: where tabs
+/// overlap, the one painted last is on top.
+pub(crate) fn tab_under<'a>(tabs: &[(&'a str, SignTab)], p: egui::Pos2) -> Option<&'a str> {
+    tabs.iter().rev().find(|(_, tab)| tab.rect.contains(p)).map(|(name, _)| *name)
+}
+
 /// Clicks on form widgets of one page. The pointer is on the first widget under it in the form's
 /// order, except on a sign tab (`tabs`, with the signature field each one signs), which is drawn
 /// over every field and so is on its own field.
@@ -137,9 +143,8 @@ pub(crate) fn page_input(
     let pointer = ui.input(|i| i.pointer.hover_pos());
     let Some(p) = pointer.filter(|p| xf.rect.contains(*p)) else { return FieldPointer::Away };
     // A tab lies inside its field's widget, so that widget is under the pointer too.
-    let on_tab = tabs.iter().find(|(_, tab)| tab.rect.contains(p)).and_then(|(name, _)| {
-        form.iter().filter(|f| f.name == *name && f.kind == FormFieldKind::Signature).find_map(|f| widget_at(xf, info, page, f, p))
-    });
+    let on_tab = tab_under(tabs, p)
+        .and_then(|name| form.iter().filter(|f| f.name == name && f.kind == FormFieldKind::Signature).find_map(|f| widget_at(xf, info, page, f, p)));
     let hit = on_tab.or_else(|| form.iter().find_map(|f| widget_at(xf, info, page, f, p)));
     let Some((f, wi, w)) = hit else { return FieldPointer::Away };
     // Empty signature fields are signed by clicking them (Use a certificate); push buttons run

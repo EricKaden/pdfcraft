@@ -428,10 +428,18 @@ fn sign_tab_label(ui: &egui::Ui, size: f32) -> std::sync::Arc<egui::Galley> {
     ui.fonts_mut(|f| f.layout_no_wrap(tl!("Sign").to_string(), theme::semibold(size), Color32::WHITE))
 }
 
-/// The sign tab of an empty signature field whose widget is at `field` on screen, laid out for
-/// its label measured at its largest size: where it is painted and where a click on it signs.
-fn sign_tab_at(ui: &egui::Ui, field: Rect) -> Option<SignTab> {
-    sign_tab_layout(field, sign_tab_label(ui, SIGN_TAB_FONT).size().x)
+/// The sign tab of an empty signature field whose widget is at `field` on screen, on the page at
+/// `page`, laid out for its label measured at its largest size: where it is painted and where a
+/// click on it signs.
+fn sign_tab_at(ui: &egui::Ui, field: Rect, page: Rect) -> Option<SignTab> {
+    sign_tab_on_page(field, page, sign_tab_label(ui, SIGN_TAB_FONT).size().x)
+}
+
+/// [`sign_tab_layout`] in the part of `field` that is on `page`: form fields take clicks on the
+/// page only, so a widget that straddles the page's edge gets its tab where a click reaches it,
+/// or none when that part has no room for one.
+pub(crate) fn sign_tab_on_page(field: Rect, page: Rect, label_width: f32) -> Option<SignTab> {
+    sign_tab_layout(field.intersect(page), label_width)
 }
 
 /// Paints a sign tab laid out by [`sign_tab_at`]: an accent chip with the signature icon and
@@ -3262,7 +3270,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
                 sign_tabs(&doc.signatures, &form, i, can_fill)
                     .into_iter()
                     .filter_map(|(name, [x0, y0, x1, y1])| {
-                        sign_tab_at(ui, xf.user_rect(info, i, [x0 as f32, y0 as f32, x1 as f32, y1 as f32])).map(|tab| (name, tab))
+                        sign_tab_at(ui, xf.user_rect(info, i, [x0 as f32, y0 as f32, x1 as f32, y1 as f32]), xf.rect).map(|tab| (name, tab))
                     })
                     .collect()
             } else {
@@ -5690,6 +5698,33 @@ mod sign_tab_tests {
         assert_eq!(widths.map(|w| shows(w, 36.0)), ["label", "label", "icon", "icon", "none"]);
         let tab = sign_tab_layout(Rect::from_min_size(Pos2::ZERO, vec2(92.0, 36.0)), 30.0).expect("fits");
         assert!(near(tab.rect.height(), 14.4) && tab.rect.width() <= 46.0, "{tab:?}");
+    }
+
+    /// A field that straddles the page's edge gets its tab in the part on the page, where clicks
+    /// reach it, or none when that part has no room for one.
+    #[test]
+    fn a_sign_tab_stays_on_the_page() {
+        let page = Rect::from_min_size(pos2(100.0, 50.0), vec2(600.0, 800.0));
+        let straddling = Rect::from_min_size(pos2(60.0, 20.0), vec2(300.0, 90.0));
+        let tab = sign_tab_on_page(straddling, page, 30.0).expect("the part on the page has room");
+        assert!(page.contains_rect(tab.rect), "{tab:?} on {page:?}");
+        assert_eq!(tab.rect.height(), SIGN_TAB_MAX, "sized to the 60 px on the page");
+        let sliver = Rect::from_min_size(pos2(60.0, 20.0), vec2(300.0, 36.0));
+        assert_eq!(sign_tab_on_page(sliver, page, 30.0), None, "6 px on the page");
+        let off = Rect::from_min_size(pos2(60.0, 900.0), vec2(300.0, 90.0));
+        assert_eq!(sign_tab_on_page(off, page, 30.0), None, "wholly off the page");
+    }
+
+    /// Where two sign tabs overlap, a click takes the one painted last, which is on top.
+    #[test]
+    fn the_sign_tab_painted_last_takes_the_click() {
+        let tab = |x: f32| sign_tab_layout(Rect::from_min_size(pos2(x, 0.0), vec2(300.0, 60.0)), 30.0).expect("fits");
+        let tabs = [("Approver", tab(0.0)), ("Witness", tab(10.0))];
+        let both = tabs[1].1.rect.left_center() + vec2(2.0, 0.0);
+        assert!(tabs[0].1.rect.contains(both), "the tabs overlap there");
+        assert_eq!(crate::forms_ui::tab_under(&tabs, both), Some("Witness"));
+        assert_eq!(crate::forms_ui::tab_under(&tabs, tabs[0].1.rect.left_center() + vec2(2.0, 0.0)), Some("Approver"));
+        assert_eq!(crate::forms_ui::tab_under(&tabs, pos2(-5.0, -5.0)), None);
     }
 
     /// One page with three signature fields: Approver is empty, Witness is signed (a signature
