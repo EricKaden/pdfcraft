@@ -12,7 +12,7 @@ use egui::{Color32, CornerRadius, Rect, Stroke, vec2};
 use pdfcraft_engine::{Edit, FieldValue, FormField, FormFieldKind, FormWidget, field_flags, form_appearance};
 use pdfcraft_render::DocInfo;
 
-use crate::canvas::{DocView, PageXform};
+use crate::canvas::{DocView, PageXform, SignTab};
 use crate::theme::Tokens;
 
 const FOCUS_BLUE: Color32 = Color32::from_rgb(0x14, 0x73, 0xE6);
@@ -110,7 +110,18 @@ pub(crate) enum FieldPointer {
     Owned,
 }
 
-/// Clicks on form widgets of one page.
+/// The first shown widget of `f` on `page` under the pointer at `p`, with its index.
+fn widget_at<'a>(xf: &PageXform, info: &DocInfo, page: usize, f: &'a FormField, p: egui::Pos2) -> Option<(&'a FormField, usize, &'a FormWidget)> {
+    f.widgets
+        .iter()
+        .enumerate()
+        .find(|(_, w)| w.page == Some(page) && !w.hidden && widget_rect(xf, info, page, w.rect).contains(p))
+        .map(|(i, w)| (f, i, w))
+}
+
+/// Clicks on form widgets of one page. The pointer is on the first widget under it in the form's
+/// order, except on a sign tab (`tabs`, with the signature field each one signs), which is drawn
+/// over every field and so is on its own field.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn page_input(
     ui: &egui::Ui,
@@ -119,18 +130,17 @@ pub(crate) fn page_input(
     page: usize,
     info: &DocInfo,
     form: &[FormField],
+    tabs: &[(&str, SignTab)],
     allowed: bool,
     view: &mut DocView,
 ) -> FieldPointer {
     let pointer = ui.input(|i| i.pointer.hover_pos());
     let Some(p) = pointer.filter(|p| xf.rect.contains(*p)) else { return FieldPointer::Away };
-    let hit = form.iter().find_map(|f| {
-        f.widgets
-            .iter()
-            .enumerate()
-            .find(|(_, w)| w.page == Some(page) && !w.hidden && widget_rect(xf, info, page, w.rect).contains(p))
-            .map(|(i, w)| (f, i, w))
+    // A tab lies inside its field's widget, so that widget is under the pointer too.
+    let on_tab = tabs.iter().find(|(_, tab)| tab.rect.contains(p)).and_then(|(name, _)| {
+        form.iter().filter(|f| f.name == *name && f.kind == FormFieldKind::Signature).find_map(|f| widget_at(xf, info, page, f, p))
     });
+    let hit = on_tab.or_else(|| form.iter().find_map(|f| widget_at(xf, info, page, f, p)));
     let Some((f, wi, w)) = hit else { return FieldPointer::Away };
     // Empty signature fields are signed by clicking them (Use a certificate); push buttons run
     // their action.
