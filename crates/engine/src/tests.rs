@@ -5192,9 +5192,6 @@ fn an_xfa_script_that_fails_partway_keeps_what_it_changed_before_the_error() {
     s.apply(id, Edit::SetFieldValue { name: "leave".into(), value: FieldValue::Check(true) }).expect("can be checked now");
 }
 
-/// A scripted form end to end: initialize and calculate on open, recalculation after a change,
-/// a failing validation's message, buttons that add and remove rows and show messages, a check
-/// box that shows a subform (undoable), FormCalc, and a save and reopen that keep it all.
 /// A laid-out XFA form tabs the way its template's traversal says: the probe form, which
 /// another viewer tabs `start A2 A3 A4 A1 B1 B3 B2 B4 C3 D1 D4 D6 finish C1 C2`.
 #[test]
@@ -5209,6 +5206,9 @@ fn xfa_forms_tab_in_their_templates_traversal_order() {
     assert_eq!(names, ["start", "A2", "A3", "A4", "A1", "B1", "B3", "B2", "B4", "C3", "D1", "D4", "D6", "finish", "C1", "C2"]);
 }
 
+/// A scripted form end to end: initialize and calculate on open, recalculation after a change,
+/// a failing validation's message, buttons that add and remove rows and show messages, a check
+/// box that shows a subform (undoable), FormCalc, and a save and reopen that keep it all.
 #[test]
 fn repeated_xfa_print_buttons_run_their_click_script() {
     let bytes = Arc::new(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::repeated_print_button_template()));
