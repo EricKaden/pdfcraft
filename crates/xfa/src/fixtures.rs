@@ -634,6 +634,17 @@ pub fn shared_node_template() -> String {
     )
 }
 
+/// A calculation `t` (printing `ran t`) that calls `xfa.form.recalculate(1)`, as some forms do
+/// in their own calculations, beside a calculation `o` (printing `ran o`); the button `again`
+/// asks for a recalculation from a click.
+pub fn recalculating_calculation_template() -> String {
+    one_page_form(
+        r#"  <field name="t" w="2in" h="0.3in" access="readOnly"><ui><textEdit/></ui><calculate><script contentType="application/x-javascript">console.println("ran t"); xfa.form.recalculate(1); "t";</script></calculate></field>
+  <field name="o" w="2in" h="0.3in" access="readOnly"><ui><textEdit/></ui><calculate><script contentType="application/x-javascript">console.println("ran o"); "o";</script></calculate></field>
+  <field name="again" w="2in" h="0.3in"><ui><button/></ui><event activity="click"><script contentType="application/x-javascript">xfa.form.recalculate(1);</script></event></field>"#,
+    )
+}
+
 /// Shaped like a leave form's row of dates: `from`, a date field typed and shown as `YYYYMMDD`
 /// (its data keeps ISO dates), `days`, an invisible `minus1` one less than `days`, and `to`,
 /// which a calculation works out as `from` plus `minus1` days. As such forms do, it checks that

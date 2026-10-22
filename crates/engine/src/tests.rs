@@ -4969,6 +4969,21 @@ fn a_write_wakes_the_readers_of_every_field_on_the_same_data_node() {
     assert_eq!(s.get(id).unwrap().form.iter().find(|f| f.name == "c").map(|f| f.value.clone()), Some(vec!["7".to_string()]));
 }
 
+/// A calculation that calls `xfa.form.recalculate()` doesn't make every calculation due again:
+/// on opening each runs once, with no "kept changing each other" error. A click that asks for a
+/// recalculation still runs them all.
+#[test]
+fn a_calculation_asking_for_a_recalculation_runs_once() {
+    let bytes = Arc::new(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::recalculating_calculation_template()));
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let id = s.open("recalc.pdf", None, bytes, None).expect("opens");
+    let out = s.take_js_output(id);
+    assert_eq!(calculations_ran(&out.console), ["t", "o"], "{:?}", out.errors);
+    assert!(out.errors.iter().all(|e| !e.contains("kept changing")), "{:?}", out.errors);
+    let o = s.run_javascript(id, "", Some("again")).unwrap();
+    assert_eq!(calculations_ran(&o.console), ["t", "o"], "a click's request runs every calculation: {o:?}");
+}
+
 /// Undoing gives the form back its earlier state and forgets what its calculations read since,
 /// so the next change runs them all once and learns again: a row brought back by undo counts
 /// in the total when it is filled in.

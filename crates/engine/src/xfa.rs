@@ -767,7 +767,10 @@ impl<'a, 'b> Runner<'a, 'b> {
                     }
                 }
                 XfaEffect::Beep => self.run.out.requests.push(Request::Beep),
-                XfaEffect::Recalculate => self.all_due = true,
+                // A calculation's own request is already served by the rounds it runs in; taking
+                // it would make every calculation, itself included, due again until the cap.
+                XfaEffect::Recalculate if ev.activity != "calculate" => self.all_due = true,
+                XfaEffect::Recalculate => {}
                 XfaEffect::Relayout => relayout = true,
             }
         }
