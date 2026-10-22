@@ -742,10 +742,11 @@ fn type_then_save_in_one_frame(h: &mut Harness<'static, PdfCraftApp>, name: &str
 }
 
 /// Keystrokes typed in the same frame as ⌘S are saved, read back once the save has written
-/// the file (it runs in the background, so a fixed number of frames can be too few).
+/// the file. Its scratch folder is its own: `tabbing_back_to_the_same_field_then_saving_keeps_the_committed_value`
+/// has a `same-frame` case, and the two run in parallel.
 #[test]
 fn typing_and_saving_in_the_same_frame_saves_the_last_keystrokes() {
-    let dir = scratch("same-frame");
+    let dir = scratch("typed-same-frame");
     let out = dir.join("saved.pdf");
     let mut h = harness();
     type_then_save_in_one_frame(&mut h, "name", "Browser", egui::Event::Text(" Form 123".into()), &out);
