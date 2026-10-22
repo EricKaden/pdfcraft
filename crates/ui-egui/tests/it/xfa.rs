@@ -130,6 +130,7 @@ fn click_field(h: &mut Harness<'static, PdfCraftApp>, name: &str) {
     h.run_steps(4);
 }
 
+/// Clicking an XFA button runs its click script: one adds a row, another shows a message.
 #[test]
 fn xfa_buttons_run_their_scripts_in_the_app() {
     let mut h = open(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::scripted_template()));
@@ -146,6 +147,40 @@ fn xfa_buttons_run_their_scripts_in_the_app() {
     assert!(h.query_by_label_contains("Hello 2").is_some(), "script console: {:?}", h.state().js_console.log);
 }
 
+/// A laid-out XFA form tabs through its read-only field, which typing leaves alone, and passes
+/// over its protected field and the protected button of its exclusion group, both ways: XFA
+/// keeps a read-only field in the tab order and leaves a protected one out of it, and another
+/// viewer tabs a probe form that way.
+#[test]
+fn tab_stops_on_read_only_xfa_fields_and_passes_over_protected_ones() {
+    let mut h = open(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::access_template()));
+    wait_for_pages(&mut h);
+    let focused = |h: &Harness<'static, PdfCraftApp>| h.state().views[0].forms.focus.as_ref().map(|f| (f.name.clone(), f.widget));
+    let value = |h: &Harness<'static, PdfCraftApp>, name: &str| {
+        let s = h.state();
+        s.session.get(s.views[0].id).unwrap().form.iter().find(|f| f.name == name).map(|f| f.value.clone())
+    };
+    click_field(&mut h, "first");
+    assert_eq!(focused(&h), Some(("first".into(), 0)));
+    for (name, widget) in [("locked", 0), ("pick", 0), ("last", 0), ("first", 0)] {
+        h.key_press(egui::Key::Tab);
+        h.run_steps(3);
+        assert_eq!(focused(&h), Some((name.into(), widget)), "Tab");
+        if name == "locked" {
+            h.event(egui::Event::Text("Changed".into()));
+            h.run_steps(2);
+        }
+    }
+    assert_eq!(value(&h, "locked"), Some(vec!["Fixed".to_string()]), "typing left the read-only field alone");
+    for (name, widget) in [("last", 0), ("pick", 0), ("locked", 0), ("first", 0)] {
+        h.key_press_modifiers(egui::Modifiers::SHIFT, egui::Key::Tab);
+        h.run_steps(3);
+        assert_eq!(focused(&h), Some((name.into(), widget)), "Shift+Tab");
+    }
+}
+
+/// A message box from a script run on open shows at once, while its print request is refused:
+/// only a click may print.
 #[test]
 fn messages_from_scripts_run_on_open_show_right_away() {
     let tpl = pdfcraft_xfa::fixtures::scripted_template()
