@@ -767,8 +767,9 @@ pub(crate) fn overlay(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, f
                 // turns the selected button off.
                 edit = if f.kind == FormFieldKind::Radio { select_edit(f, w) } else { toggle_edit(f, w) };
             } else if let Some(forward) = step {
-                // The arrows move to the group's next or previous button and select it, wrapping.
-                let stops: Vec<usize> = f.widgets.iter().enumerate().filter(|(_, w)| w.page.is_some() && !w.hidden).map(|(i, _)| i).collect();
+                // The arrows move to the group's next or previous button that Tab stops at (never
+                // a protected one) and select it, wrapping.
+                let stops: Vec<usize> = f.widgets.iter().enumerate().filter(|(_, w)| tab_stop(f, w)).map(|(i, _)| i).collect();
                 if let Some(pos) = stops.iter().position(|&i| i == focus.widget) {
                     let k = if forward { (pos + 1) % stops.len() } else { (pos + stops.len() - 1) % stops.len() };
                     if let Some((wi, target)) = stops.get(k).and_then(|&wi| Some((wi, f.widgets.get(wi)?))) {

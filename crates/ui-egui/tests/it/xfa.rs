@@ -179,6 +179,31 @@ fn tab_stops_on_read_only_xfa_fields_and_passes_over_protected_ones() {
     }
 }
 
+/// The arrows move within an exclusion group as Tab does: they never land on, or select, its
+/// protected button.
+#[test]
+fn arrows_in_an_xfa_exclusion_group_pass_over_its_protected_button() {
+    let mut h = open(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::access_template()));
+    wait_for_pages(&mut h);
+    let focused = |h: &Harness<'static, PdfCraftApp>| h.state().views[0].forms.focus.as_ref().map(|f| (f.name.clone(), f.widget));
+    let picked_b = |h: &Harness<'static, PdfCraftApp>| {
+        let s = h.state();
+        s.session.get(s.views[0].id).unwrap().form.iter().find(|f| f.name == "pick").is_some_and(|f| f.value.iter().any(|v| v == "B"))
+    };
+    click_field(&mut h, "first");
+    for _ in 0..2 {
+        h.key_press(egui::Key::Tab);
+        h.run_steps(3);
+    }
+    assert_eq!(focused(&h), Some(("pick".into(), 0)));
+    for key in [egui::Key::ArrowRight, egui::Key::ArrowLeft, egui::Key::ArrowDown, egui::Key::ArrowUp] {
+        h.key_press(key);
+        h.run_steps(3);
+        assert_eq!(focused(&h), Some(("pick".into(), 0)), "{key:?}");
+        assert!(!picked_b(&h), "{key:?} selected the protected button");
+    }
+}
+
 /// A message box from a script run on open shows at once, while its print request is refused:
 /// only a click may print.
 #[test]
