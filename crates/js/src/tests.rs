@@ -1,5 +1,7 @@
 use super::*;
 
+/// The AcroForm fields these tests' scripts read and write: prices, a quantity, a total, a ZIP
+/// code, a check box and a drop-down with shown and saved items.
 fn fields() -> Vec<FieldState> {
     let mut agree = FieldState::new("agree", FieldType::CheckBox, vec![]);
     agree.options = vec![("Yes".into(), "Yes".into())];
@@ -20,6 +22,7 @@ fn doc() -> DocInfo {
     DocInfo { file_name: "order.pdf".into(), num_pages: 3, page: 0, info: vec![("title".into(), "Order".into())], highlight: false }
 }
 
+/// Run AcroForm JavaScript `script` for `event` on these tests' document and fields.
 fn go(script: &str, event: &Event) -> Outcome {
     run(script, event, &doc(), &fields(), &[], Limits::default())
 }
@@ -1212,6 +1215,8 @@ mod session {
     }
 }
 
+/// Scripts run on a shared field snapshot without changing it: a script's writes and a failed
+/// script's partial writes stay in its own result, and its globals don't reach the next script.
 #[test]
 fn shared_field_snapshots_isolate_writes_errors_and_script_globals() {
     let initial = Arc::new(fields());

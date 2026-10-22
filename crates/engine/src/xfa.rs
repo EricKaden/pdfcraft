@@ -164,6 +164,8 @@ fn is_field(n: &FormNode, som: &str, depth: usize) -> bool {
     (n.som == som && n.kind == Some(NodeKind::Field)) || n.children.iter().any(|c| is_field(c, som, depth + 1))
 }
 
+/// The subform or other container at SOM path `som` in the live form under `n` (fields are
+/// skipped), searched at most 64 levels deep.
 fn find_container<'a>(n: &'a FormNode, som: &str, depth: usize) -> Option<&'a FormNode> {
     if depth > 64 {
         return None;

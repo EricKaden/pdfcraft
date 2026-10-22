@@ -1015,6 +1015,7 @@ fn resolver(ctx: &mut Context, from: usize, many: bool) -> JsResult<JsValue> {
 
 // ── xfa.host, xfa.layout, xfa.event, app, console ───────────────────────────────────────────
 
+/// Queue effect `e` (a value set, a message, a request) for the engine to apply after the script.
 fn effect(ctx: &mut Context, e: XfaEffect) -> JsResult<()> {
     host(ctx)?.borrow_mut().push(e);
     Ok(())
@@ -1036,6 +1037,7 @@ fn set_runtime_highlight(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> Js
     Ok(JsValue::undefined())
 }
 
+/// `xfa.host.messageBox(text)`: queues the message (cut to the stored length) and answers 1 (OK).
 fn message_box(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
     let m = clip(text(&arg(args, 0), ctx)?);
     effect(ctx, XfaEffect::MessageBox(m))?;

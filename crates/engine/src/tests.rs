@@ -7016,6 +7016,8 @@ fn dynamic_calculation_reads_and_side_effects_reach_later_fields() {
     assert!(s.take_js_output(id).errors.is_empty());
 }
 
+/// Within one edit, a field's `display` reads as the file had it before the edit, even after a
+/// script set it with the value cached; the next edit's runner reads what the script wrote.
 #[test]
 fn scripted_display_changes_survive_warm_cache_and_new_edit() {
     use pdfcraft_forms::{FieldEvent, Scripts};

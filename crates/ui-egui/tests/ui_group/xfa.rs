@@ -213,6 +213,8 @@ fn scripts_turned_off_by_a_click_bring_a_closed_notice_bar_back() {
     assert!(!says_scripts_are_off(&h.state().toast), "{:?}", h.state().toast);
 }
 
+/// On an encrypted dynamic XFA form that allows filling, the notice bar shows the layout note and
+/// the security sentence together, with both the field-highlight and Security settings buttons.
 #[test]
 fn a_secured_dynamic_xfa_form_shows_its_layout_and_its_security() {
     // Changing and assembling withheld, filling allowed.
