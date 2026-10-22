@@ -221,6 +221,8 @@ fn the_xdp_template_wins_over_the_config_packets_template_element() {
     assert_eq!(tpl.root.common.name.as_deref(), Some("form"));
 }
 
+/// The sample form lays out over two pages: captions, draws and page numbers are drawn,
+/// hidden draws take no space, and each field gets its widget with its size, kind and SOM path.
 #[test]
 fn layout_places_captions_fields_and_sizes_containers_to_their_content() {
     let form = layout_xml(&template(1)).unwrap();
@@ -304,6 +306,8 @@ fn line_starts(text: &str, w: f64, para: &str) -> Vec<f64> {
     lines.into_iter().map(|(_, x)| x - 36.0).collect()
 }
 
+/// A negative textIndent hangs the first line: it starts left of the others, never left of the
+/// box, and the other lines move in by the hang. A positive indent still moves only the first line.
 #[test]
 fn a_negative_text_indent_hangs_the_first_line_and_indents_the_rest() {
     let text = "11. SERVICE MEMBER BALANCE (TOTAL)";
@@ -321,6 +325,7 @@ fn a_negative_text_indent_hangs_the_first_line_and_indents_the_rest() {
     assert!((starts[0] - 10.0).abs() < 1e-6 && starts[1..].iter().all(|x| x.abs() < 1e-6), "{starts:?}");
 }
 
+/// A hang wider than its box is bounded by it: every line still starts and ends inside the box.
 #[test]
 fn a_hang_wider_than_the_box_keeps_every_line_inside_it() {
     // A 58pt box hanging its first line by 100pt, right-aligned: every line still starts and
@@ -351,6 +356,8 @@ fn a_label_without_a_width_measures_its_hanging_indent_as_it_is_laid_out() {
     assert!((span.x - (36.0 + 72.0)).abs() < 0.05, "starts at its x: {}", span.x);
 }
 
+/// A long table breaks across pages between whole rows, repeats its header row at the top of
+/// each page it continues on, and keeps every row (and field name) once.
 #[test]
 fn tables_break_across_pages_and_repeat_their_header_row() {
     let form = layout_xml(&template(40)).unwrap();
