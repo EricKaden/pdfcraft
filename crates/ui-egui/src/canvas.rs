@@ -362,7 +362,8 @@ pub(crate) fn signature_badges(signatures: &[pdfcraft_engine::SignatureInfo], pa
 /// rectangles (user space). Each is unsigned and visible, on this page, with a rectangle that
 /// passes the same screen-space guard as [`signature_badges`]. A click must also be able to sign
 /// it, as in `forms_ui::page_input`: the document allows filling (`can_fill`), and the form field
-/// of that name is a signature field that isn't read-only, with a shown widget at that place.
+/// of that name is a signature field that isn't read-only, with a shown widget at that place
+/// that isn't read-only on its own.
 pub(crate) fn sign_tabs<'a>(
     signatures: &'a [pdfcraft_engine::SignatureInfo],
     form: &[pdfcraft_engine::FormField],
@@ -382,7 +383,9 @@ pub(crate) fn sign_tabs<'a>(
     let signable: HashSet<(&str, [u64; 4])> = form
         .iter()
         .filter(|f| f.kind == pdfcraft_engine::FormFieldKind::Signature && !f.read_only())
-        .flat_map(|f| f.widgets.iter().filter(|w| w.page == Some(page) && !w.hidden).map(move |w| (f.name.as_str(), w.rect.map(f64::to_bits))))
+        .flat_map(|f| {
+            f.widgets.iter().filter(|w| w.page == Some(page) && !w.hidden && !w.read_only).map(move |w| (f.name.as_str(), w.rect.map(f64::to_bits)))
+        })
         .collect();
     empty.filter(|(name, r)| signable.contains(&(*name, r.map(f64::to_bits)))).collect()
 }
@@ -5860,6 +5863,7 @@ mod sign_tab_tests {
                 tab: 0,
                 locked: false,
                 hidden: false,
+                read_only: false,
                 rotation: 0,
                 caption: None,
                 list: None,
@@ -5916,7 +5920,7 @@ mod sign_tab_tests {
 
     /// Fields a click would not sign get no tab: a read-only field, a document that refuses
     /// filling, a listing with no form field of its name, a field of another kind of that name,
-    /// and a widget that is hidden or elsewhere.
+    /// and a widget that is hidden, read-only on its own or elsewhere.
     #[test]
     fn sign_tabs_skip_fields_that_a_click_cannot_sign() {
         let empty = || listing("Approver", 0, RECT);
@@ -5931,6 +5935,7 @@ mod sign_tab_tests {
             ("no form field", empty(), Vec::new(), true),
             ("another kind", empty(), with(|f| f.kind = FormFieldKind::Text), true),
             ("hidden widget", empty(), with(|f| f.widgets.iter_mut().for_each(|w| w.hidden = true)), true),
+            ("read-only widget", empty(), with(|f| f.widgets.iter_mut().for_each(|w| w.read_only = true)), true),
             ("widget elsewhere", empty(), with(|f| f.widgets.iter_mut().for_each(|w| w.rect = [160.0, 110.0, 280.0, 180.0])), true),
         ];
         assert_eq!(tabbed(&cases), Vec::<&str>::new());
