@@ -275,6 +275,8 @@ pub fn layout(tpl: &Template, data: Option<&DataNode>) -> Result<Form, XfaError>
             }
         }
     }
+    // Tab goes the way the template's traversal says.
+    crate::traverse::order_widgets(&root_node, &mut l.pages);
     Ok(Form { pages: l.pages, fields: l.fields, warnings: l.warnings })
 }
 
