@@ -648,7 +648,9 @@ fn parse_node(c: XmlNode, warnings: &mut Vec<String>, depth: usize) -> Option<No
 }
 
 /// Whether a `layout:ready` script uses page numbers (`xfa.layout.page(this)`, `pageCount()`): on a
-/// field, it makes the field one the layout numbers itself.
+/// field, it makes the field one the layout numbers itself. It looks for the names in the
+/// script's text and doesn't parse it, so a script that only mentions one (in a comment or a
+/// string) counts too, and its writes to its field are dropped like a page number's.
 pub fn numbers_pages(script: &str) -> bool {
     script.contains("pageCount") || script.contains("layout.page(") || script.contains("layout.absPage(")
 }
