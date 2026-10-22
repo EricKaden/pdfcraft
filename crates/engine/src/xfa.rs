@@ -33,7 +33,7 @@ const EVENT_BUDGET_MS: u64 = 5_000;
 const MAX_RUNS_PER_CALCULATION: usize = 16;
 /// Most calculations whose reads a document keeps: a form that keeps adding rows starts over
 /// past it, and every calculation runs once more, as on opening.
-const MAX_RECORDED_CALCULATIONS: usize = 50_000;
+pub(crate) const MAX_RECORDED_CALCULATIONS: usize = 50_000;
 /// Most field reads a document keeps for all its calculations together: past it, a
 /// calculation's reads are not kept and any change concerns it, so a form whose calculations
 /// each read thousands of fields stays within memory.
@@ -197,6 +197,23 @@ impl CalcDeps {
     /// The calculations that read `field`, and those that read too much to tell.
     fn readers_of(&self, field: &str) -> Vec<String> {
         self.readers.get(field).into_iter().flatten().chain(self.wide.iter()).cloned().collect()
+    }
+
+    /// A record holding `n` made-up calculations, each having read one field of its own: for
+    /// tests that bring a document's record to [`MAX_RECORDED_CALCULATIONS`].
+    #[cfg(test)]
+    pub(crate) fn filled(n: usize) -> CalcDeps {
+        let mut deps = CalcDeps::default();
+        for i in 0..n {
+            deps.record(&format!("made.up[{i}]"), vec![format!("made.up.read[{i}]")], false);
+        }
+        deps
+    }
+
+    /// The number of calculations recorded (tests).
+    #[cfg(test)]
+    pub(crate) fn recorded(&self) -> usize {
+        self.reads.len()
     }
 }
 

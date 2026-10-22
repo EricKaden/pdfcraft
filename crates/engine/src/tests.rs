@@ -4969,6 +4969,26 @@ fn a_write_wakes_the_readers_of_every_field_on_the_same_data_node() {
     assert_eq!(s.get(id).unwrap().form.iter().find(|f| f.name == "c").map(|f| f.value.clone()), Some(vec!["7".to_string()]));
 }
 
+/// When a document's record of what its calculations read reaches its cap during an event, it
+/// starts over: the calculations it no longer knows run once more, and the event still ends well
+/// within the runs one calculation may take, with no "kept changing each other" error.
+#[test]
+fn a_record_that_starts_over_during_an_event_still_ends_it() {
+    let bytes = Arc::new(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::recalculation_template()));
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let id = s.open("recalc.pdf", None, bytes, None).expect("opens");
+    s.take_js_output(id);
+    // A record one short of the cap, as many earlier events adding rows would leave it.
+    s.doc_mut(id).unwrap().xfa_calc_deps = Arc::new(xfa::CalcDeps::filled(xfa::MAX_RECORDED_CALCULATIONS - 1));
+    s.apply(id, Edit::SetFieldValue { name: "entry".into(), value: FieldValue::Text("5".into()) }).unwrap();
+    let out = s.take_js_output(id);
+    // None of A, C and B is known, so each runs; recording C fills the record, which starts
+    // over, so A, known no more, runs once more.
+    assert_eq!(calculations_ran(&out.console), ["A", "C", "B", "A"], "{:?}", out.errors);
+    assert!(out.errors.iter().all(|e| !e.contains("kept changing")), "{:?}", out.errors);
+    assert_eq!(s.get(id).unwrap().xfa_calc_deps.recorded(), 3, "the record started over with A, C and B");
+}
+
 /// A calculation that calls `xfa.form.recalculate()` doesn't make every calculation due again:
 /// on opening each runs once, with no "kept changing each other" error. A click that asks for a
 /// recalculation still runs them all.

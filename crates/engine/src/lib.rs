@@ -3857,8 +3857,8 @@ impl Session {
             _ => edit.label(),
         };
         // An XFA form's scripts answer the change: exit and validate scripts of the field, then
-        // the calculations that read what changed (a reset recalculates them all). They read the data, so it is brought up
-        // to date first.
+        // the calculations that read what changed (a reset recalculates them all). They read
+        // the data, so it is brought up to date first.
         if let Some(tpl) = cx.xfa.clone() {
             if is_xfa && matches!(scope_of(&edit), Scope::Form | Scope::Full | Scope::Content) {
                 let datasets = &mut cx.xfa_datasets;
