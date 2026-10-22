@@ -4574,6 +4574,24 @@ fn a_calculated_field_another_script_writes_calculates_again() {
     assert!(total.iter().all(|v| v.is_empty()), "the visible copy's calculation emptied it: {total:?}");
 }
 
+/// The document's record of what its calculations read is copied only by an edit that runs the
+/// form's scripts: an edit that runs none (the document's title) leaves it shared, and a field
+/// edit runs its scripts on a copy, which the document then keeps.
+#[test]
+fn only_an_edit_that_runs_the_forms_scripts_copies_what_its_calculations_read() {
+    let bytes = Arc::new(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::recalculation_template()));
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let id = s.open("recalc.pdf", None, bytes, None).expect("opens");
+    assert_eq!(calculations_ran(&s.take_js_output(id).console), ["A", "C", "B"]);
+    let record = |s: &Session| s.get(id).unwrap().xfa_calc_deps.clone();
+    let opened = record(&s);
+    s.apply(id, Edit::SetInfo { key: "Title".into(), value: "Report".into() }).unwrap();
+    assert!(Arc::ptr_eq(&opened, &record(&s)), "no script ran, so nothing was copied");
+    s.apply(id, Edit::SetFieldValue { name: "entry".into(), value: FieldValue::Text("5".into()) }).unwrap();
+    assert_eq!(calculations_ran(&s.take_js_output(id).console), ["A"], "the record still steers the calculations");
+    assert!(!Arc::ptr_eq(&opened, &record(&s)), "the field's scripts ran on a copy, which the document kept");
+}
+
 /// A script's write to a field reaches every field bound to the same data node, and so does
 /// the rerun: a calculation that reads the other field runs again.
 #[test]
