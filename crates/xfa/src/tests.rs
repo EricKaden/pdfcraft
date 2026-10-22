@@ -325,22 +325,31 @@ fn a_negative_text_indent_hangs_the_first_line_and_indents_the_rest() {
     assert!((starts[0] - 10.0).abs() < 1e-6 && starts[1..].iter().all(|x| x.abs() < 1e-6), "{starts:?}");
 }
 
-/// A hang wider than its box is bounded by it: every line still starts and ends inside the box.
+/// A hang wider than its box is bounded by it: every line still starts and ends inside the box,
+/// and lines after the first keep room for the widest glyph when the text wraps.
 #[test]
 fn a_hang_wider_than_the_box_keeps_every_line_inside_it() {
-    // A 58pt box hanging its first line by 100pt, right-aligned: every line still starts and
-    // ends inside the box.
-    let xdp = r##"<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/"><template xmlns="http://www.xfa.org/schema/xfa-template/3.3/">
+    // A 58pt box hanging its first line by 100pt, right-aligned.
+    for text in ["AB CD EF", "ABCDEFGHIJ KLMNOPQRST UVWXYZ MMMM WWWW"] {
+        let xdp = format!(
+            r##"<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/"><template xmlns="http://www.xfa.org/schema/xfa-template/3.3/">
 <subform name="form" layout="tb">
  <pageSet><pageArea name="front"><contentArea x="0.5in" y="0.5in" w="7.5in" h="10in"/><medium short="8.5in" long="11in"/></pageArea></pageSet>
- <draw name="label" w="58pt" h="2in"><value><text>AB CD EF</text></value><font typeface="Arial" size="8pt"/><para hAlign="right" textIndent="-100pt" lineHeight="8pt"/></draw>
+ <draw name="label" w="58pt" h="5in"><value><text>{text}</text></value><font typeface="Arial" size="8pt"/><para hAlign="right" textIndent="-100pt" lineHeight="8pt"/></draw>
 </subform>
-</template></xdp:xdp>"##;
-    let form = layout_xml(xdp).unwrap();
-    for item in &form.pages[0].items {
-        let Item::Text(s) = item else { continue };
-        let right = s.x + s.face.width(s.text.trim_end());
-        assert!(s.x >= 36.0 - 1e-6 && right <= 36.0 + 58.0 + 1e-6, "{:?} runs from {} to {right}", s.text, s.x);
+</template></xdp:xdp>"##
+        );
+        let form = layout_xml(&xdp).unwrap();
+        let mut lines = std::collections::BTreeSet::new();
+        for item in &form.pages[0].items {
+            let Item::Text(s) = item else { continue };
+            lines.insert((s.baseline * 100.0).round() as i64);
+            let right = s.x + s.face.width(s.text.trim_end());
+            assert!(s.x >= 36.0 - 1e-6 && right <= 36.0 + 58.0 + 1e-6, "{text}: {:?} runs from {} to {right}", s.text, s.x);
+        }
+        if text.len() > 10 {
+            assert!(lines.len() > 1, "{text}: wraps onto more lines ({})", lines.len());
+        }
     }
 }
 

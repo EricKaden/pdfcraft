@@ -213,16 +213,18 @@ pub fn layout(rich: &RichText, rect: Rect, para: &Para, base: &Face, embed: &dyn
         size: f64,
         first: bool,
     }
+    let paragraphs: Vec<Vec<Word>> = rich.paragraphs.iter().map(|p| words(&p.runs, base, embed)).collect();
     // A negative textIndent is a hanging indent: the first line starts left of the others. It
     // never starts left of the box, so the others move in to make room, as other viewers lay
-    // such labels out; never past the box's right edge, however wide the hang.
-    let hang = (-para.text_indent).min((rect.w - para.margin_right - 1.0).max(0.0));
+    // such labels out; never so far that a line after the first has no room for the widest
+    // glyph, however wide the hang.
+    let widest = paragraphs.iter().flatten().map(widest_glyph).fold(1.0, f64::max);
+    let hang = (-para.text_indent).min((rect.w - para.margin_right - widest).max(0.0));
     let (margin_left, first_indent) = indents(para, hang);
     let avail = (rect.w - margin_left - para.margin_right).max(1.0);
     let mut lines: Vec<(Line, Option<HAlign>)> = Vec::new();
     let mut total = 0.0;
-    for (pi, p) in rich.paragraphs.iter().enumerate() {
-        let ws = words(&p.runs, base, embed);
+    for (pi, (p, ws)) in rich.paragraphs.iter().zip(paragraphs).enumerate() {
         let mut line = Line { words: Vec::new(), width: 0.0, size: base.size, first: true };
         let mut first_in_para = true;
         let indent = |first: bool| if first { first_indent } else { 0.0 };
@@ -331,6 +333,20 @@ pub fn natural_width(rich: &RichText, para: &Para, base: &Face, embed: &dyn Fn(&
     let (margin_left, first_indent) = indents(para, -para.text_indent);
     let widest = rich.paragraphs.iter().map(|p| words(&p.runs, base, embed).iter().map(|w| w.width).sum::<f64>()).fold(0.0, f64::max);
     (margin_left + first_indent + widest + para.margin_right).max(0.0)
+}
+
+/// The width of the widest glyph `w` draws (spaces draw nothing).
+fn widest_glyph(w: &Word) -> f64 {
+    let mut glyph = String::new();
+    w.text
+        .chars()
+        .filter(|c| *c != ' ')
+        .map(|c| {
+            glyph.clear();
+            glyph.push(c);
+            w.face.width(&glyph)
+        })
+        .fold(0.0, f64::max)
 }
 
 /// The left margin of a paragraph's lines and where its first line starts from them, for a
