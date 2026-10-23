@@ -83,7 +83,8 @@ fn button_scripts_run_and_alert() {
 
 /// One run's messages are all shown, in order (#4294): the first takes the toast with its title
 /// and icon (#4293), the next takes it when the first is gone, and a notice shown meanwhile
-/// doesn't lose the ones still waiting.
+/// doesn't lose the ones still waiting. Messages past the queue's room are counted and reported
+/// once the rest have been shown.
 #[test]
 fn every_message_a_script_shows_takes_the_toast_in_turn() {
     use pdfcraft_engine::js::{MessageButtons, MessageIcon};
@@ -121,6 +122,21 @@ fn every_message_a_script_shows_takes_the_toast_in_turn() {
     h.state_mut().toast = None;
     h.run_steps(2);
     assert_eq!(shown(&h).as_deref(), Some("Fourth"));
+    // Past the 100 the queue holds, messages are counted, and the toast says how many once the
+    // rest have been shown.
+    h.state_mut().toast = None;
+    h.run_steps(2);
+    let many: Vec<_> = (0..105).map(|i| pdfcraft_engine::js::Message::plain(format!("Message {i}"))).collect();
+    h.state_mut().show_script_messages(many);
+    assert_eq!(shown(&h).as_deref(), Some("Message 0"));
+    for i in 1..100 {
+        assert!(h.state_mut().next_script_message());
+        assert_eq!(shown(&h), Some(format!("Message {i}")));
+    }
+    assert!(h.state_mut().next_script_message(), "the notice comes after the last message");
+    assert_eq!(shown(&h).as_deref(), Some("5 more messages from the form's scripts were left out."));
+    assert_eq!(h.state().toast_script, None, "an app notice, not a script message");
+    assert!(!h.state_mut().next_script_message(), "said once");
 }
 
 #[test]

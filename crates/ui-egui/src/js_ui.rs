@@ -22,8 +22,9 @@ pub struct DocJsDraft {
     pub script: String,
 }
 
-/// Most form script messages that wait for the toast; past it, more are left out. One run shows
-/// at most this many (the script engine's own limit), so only runs in quick succession reach it.
+/// Most form script messages that wait for the toast; past it, more are left out and counted, and
+/// the toast says how many once the rest have been shown. One run shows at most this many (the
+/// script engine's own limit), so only runs in quick succession reach it.
 const MAX_WAITING_MESSAGES: usize = 100;
 
 /// The icon a script message's toast shows for `icon`.
@@ -93,15 +94,31 @@ impl PdfCraftApp {
     /// to go ([`Self::next_script_message`]).
     pub fn show_script_messages(&mut self, messages: Vec<Message>) {
         let room = MAX_WAITING_MESSAGES.saturating_sub(self.script_messages.len());
+        let left_out = u64::try_from(messages.len().saturating_sub(room)).unwrap_or(u64::MAX);
+        self.script_messages_dropped = self.script_messages_dropped.saturating_add(left_out);
         self.script_messages.extend(messages.into_iter().take(room));
         if self.toast.is_none() {
             self.next_script_message();
         }
     }
 
-    /// Put the next waiting script message in the toast. False when none waits.
+    /// Put the next waiting script message in the toast, or, once none waits, a notice of how many
+    /// the queue had no room for. False when there is neither.
     pub fn next_script_message(&mut self) -> bool {
-        let Some(m) = self.script_messages.pop_front() else { return false };
+        let Some(m) = self.script_messages.pop_front() else {
+            // Every message the queue held has been shown: say how many it had no room for.
+            if self.script_messages_dropped == 0 {
+                return false;
+            }
+            let n = std::mem::take(&mut self.script_messages_dropped);
+            self.notify(crate::i18n::trn(
+                crate::i18n::current(),
+                n,
+                "{n} more message from the form's scripts was left out.",
+                "{n} more messages from the form's scripts were left out.",
+            ));
+            return true;
+        };
         self.toast = Some((m.text.clone(), 0.0));
         self.toast_script = Some(m);
         true

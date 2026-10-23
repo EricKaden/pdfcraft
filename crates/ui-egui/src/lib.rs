@@ -615,6 +615,8 @@ pub struct PdfCraftApp {
     /// Form script messages waiting for the toast, in the order the scripts showed them: each
     /// takes the toast when the one before it is gone, so every one is seen (#4294).
     pub script_messages: std::collections::VecDeque<pdfcraft_engine::js::Message>,
+    /// Form script messages the waiting queue had no room for, since the toast last said how many.
+    pub script_messages_dropped: u64,
     /// Whether the macOS title bar is drawn by us (traffic lights over our tab strip).
     pub integrated_titlebar: bool,
     /// Set when the desktop leaves the window frame to the app (GNOME on Wayland): the tab strip
@@ -1010,6 +1012,7 @@ impl PdfCraftApp {
             toast: None,
             toast_script: None,
             script_messages: std::collections::VecDeque::new(),
+            script_messages_dropped: 0,
             integrated_titlebar: false,
             window_controls: None,
             system_title_bar: false,
