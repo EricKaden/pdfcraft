@@ -263,6 +263,7 @@ impl Host {
         let bytes = match &r {
             Request::Reset(names) => names.iter().fold(0usize, |n, s| n.saturating_add(s.len()).saturating_add(std::mem::size_of::<String>())),
             Request::LaunchUrl(u) | Request::Submit(u) | Request::Focus(u) => u.len(),
+            Request::OpenAttachment { name, .. } => name.len(),
             _ => 0,
         };
         if self.room(bytes) {
@@ -672,7 +673,7 @@ pub(crate) fn data_object(args: &[JsValue], ctx: &mut Context) -> JsResult<(Stri
 /// `this.exportDataObject(…)`: asks the viewer to open or save an attached file.
 fn export_data_object(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
     let (name, open) = data_object(args, ctx)?;
-    host(ctx)?.borrow_mut().requests.push(Request::OpenAttachment { name, open });
+    host(ctx)?.borrow_mut().request(Request::OpenAttachment { name, open });
     Ok(JsValue::undefined())
 }
 

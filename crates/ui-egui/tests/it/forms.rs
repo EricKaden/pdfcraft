@@ -1443,8 +1443,9 @@ fn a_form_button_opens_its_attached_instructions_in_a_new_tab() {
     h.run_steps(2);
     assert!(h.state().toast.as_ref().is_some_and(|t| t.0.contains("nope.pdf")), "{:?}", h.state().toast);
     assert_eq!(tabs(&h).len(), 2);
-    // A name of the form's own is shortened in the message, keeping its end.
-    h.state_mut().run_button_script(id, "go", "this.exportDataObject({cName: new Array(5001).join('x') + '.pdf', nLaunch: 2});");
+    // A name of the form's own is shortened in the message, keeping its end. (Past a line's
+    // length, the script engine cuts it first, as it cuts every name a script passes.)
+    h.state_mut().run_button_script(id, "go", "this.exportDataObject({cName: new Array(3001).join('x') + '.pdf', nLaunch: 2});");
     h.run_steps(2);
     let toast = h.state().toast.as_ref().map(|t| t.0.clone()).unwrap_or_default();
     assert!(toast.contains('…') && toast.contains("x.pdf"), "{toast}");
