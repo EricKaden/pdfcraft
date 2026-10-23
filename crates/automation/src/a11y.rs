@@ -650,6 +650,7 @@ impl Automation {
     }
 }
 
+/// A request a script made, as `js_run` reports it.
 fn request_json(r: &pdfcraft_engine::js::Request) -> Value {
     use pdfcraft_engine::js::Request as R;
     match r {
@@ -664,12 +665,21 @@ fn request_json(r: &pdfcraft_engine::js::Request) -> Value {
     }
 }
 
+/// A message a script showed, as `js_run` reports it: its text, title (null when it gave none),
+/// icon and buttons.
+fn alert_json(m: &pdfcraft_engine::js::Message) -> Value {
+    json!({ "message": m.text, "title": m.title, "icon": m.icon.name(), "buttons": m.buttons.name() })
+}
+
 impl Automation {
+    /// `js_run`: run `script` in the document, or as button `field`'s script, and report its
+    /// messages, console lines, requests, error and result.
     pub(crate) fn js_run(&mut self, a: &Args) -> Result<Value> {
         let id = self.doc(a)?.id;
         let o = self.session.run_javascript(id, a.str("script")?, a.opt_str("field")?).map_err(failed)?;
         let reqs: Vec<Value> = o.requests.iter().map(request_json).collect();
-        Ok(json!({ "alerts": o.alerts, "console": o.console, "requests": reqs, "error": o.error, "result": o.result }))
+        let alerts: Vec<Value> = o.alerts.iter().map(alert_json).collect();
+        Ok(json!({ "alerts": alerts, "console": o.console, "requests": reqs, "error": o.error, "result": o.result }))
     }
 
     pub(crate) fn js_document_scripts(&self, a: &Args) -> Result<Value> {

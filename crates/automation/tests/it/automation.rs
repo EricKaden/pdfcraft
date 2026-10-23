@@ -5947,6 +5947,8 @@ fn ocr_recognize_files_writes_searchable_copies() {
     assert!(found.to_string().contains("\"page\""), "{found}");
 }
 
+/// Field scripts set through the tools validate, calculate and format, and `js_run` reports console
+/// lines, every message with its details, and requests.
 #[test]
 fn javascript_through_tools() {
     let dir = workdir("js");
@@ -5980,10 +5982,17 @@ fn javascript_through_tools() {
     let r = ok(
         &mut a,
         "js_run",
-        json!({ "doc": doc, "script": "console.println(getField('Total').value); getField('Qty').value = 3; this.pageNum = 1; app.alert('ok');" }),
+        json!({ "doc": doc, "script": "console.println(getField('Total').value); getField('Qty').value = 3; this.pageNum = 1; app.alert('ok'); app.alert({ cMsg: 'Clear?', cTitle: 'Order', nIcon: 2, nType: 3 });" }),
     );
     assert_eq!(r["console"][0], "2500");
-    assert_eq!(r["alerts"][0], "ok");
+    // Every message, in order, with its title, icon and buttons.
+    assert_eq!(
+        r["alerts"],
+        json!([
+            { "message": "ok", "title": null, "icon": "error", "buttons": "ok" },
+            { "message": "Clear?", "title": "Order", "icon": "question", "buttons": "yes_no_cancel" },
+        ])
+    );
     assert_eq!(r["requests"][0]["page"], 2);
     let f = ok(&mut a, "form_fields", json!({ "doc": doc }));
     let total = f["fields"].as_array().unwrap().iter().find(|x| x["name"] == "Total").unwrap().clone();
@@ -6803,6 +6812,8 @@ fn repeated_xfa_print_buttons_work_through_tools_and_after_reopen() {
     check(&mut a, doc);
 }
 
+/// A dynamic XFA form's scripts run on open, on fills and for buttons through the tools, with undo,
+/// and `js_run` reports their messages.
 #[test]
 fn xfa_scripts_run_for_buttons_and_field_changes_through_tools() {
     let dir = workdir("xfa-scripts");
@@ -6830,7 +6841,7 @@ fn xfa_scripts_run_for_buttons_and_field_changes_through_tools() {
     ok(&mut a, "edit_undo", json!({ "doc": doc }));
     assert!(field(&mut a, "amount_2").is_none());
     let r = ok(&mut a, "js_run", json!({ "doc": doc, "script": "", "field": "hello" }));
-    assert_eq!(r["alerts"], json!(["Hello 4"]));
+    assert_eq!(r["alerts"], json!([{ "message": "Hello 4", "title": null, "icon": "error", "buttons": "ok" }]));
 }
 
 #[test]

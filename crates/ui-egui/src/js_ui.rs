@@ -2,7 +2,7 @@
 //! the JavaScript console (⌘J), Document JavaScripts, and Preferences ▸ JavaScript.
 
 use egui::{Align, Layout};
-use pdfcraft_engine::js::{JsOutput, Request};
+use pdfcraft_engine::js::{JsOutput, Message, MessageIcon, Request};
 use pdfcraft_engine::{DocId, Edit};
 
 use crate::theme::{self, Tokens};
@@ -20,6 +20,20 @@ pub struct JsConsole {
 pub struct DocJsDraft {
     pub name: String,
     pub script: String,
+}
+
+/// Most form script messages that wait for the toast; past it, more are left out. One run shows
+/// at most this many (the script engine's own limit), so only runs in quick succession reach it.
+const MAX_WAITING_MESSAGES: usize = 100;
+
+/// The icon a script message's toast shows for `icon`.
+pub(crate) fn message_icon(icon: MessageIcon) -> &'static str {
+    match icon {
+        MessageIcon::Error => "circle-x",
+        MessageIcon::Warning => "triangle-alert",
+        MessageIcon::Question => "circle-help",
+        MessageIcon::Status => "info",
+    }
 }
 
 /// What the user is told when a form's scripts were turned off: in a toast as it happens, then
@@ -70,9 +84,26 @@ impl PdfCraftApp {
                 Request::Focus(_) | Request::Beep | Request::Reset(_) => {}
             }
         }
-        if let Some(a) = out.alerts.last() {
-            self.notify(a.clone());
+        self.show_script_messages(out.alerts);
+    }
+
+    /// Show form script messages `messages` in order, each in the toast with its title and icon.
+    /// The first takes the toast at once unless it shows another script message; the rest wait
+    /// their turn ([`Self::next_script_message`]).
+    pub fn show_script_messages(&mut self, messages: Vec<Message>) {
+        let room = MAX_WAITING_MESSAGES.saturating_sub(self.script_messages.len());
+        self.script_messages.extend(messages.into_iter().take(room));
+        if self.toast.is_none() || self.toast_script.is_none() {
+            self.next_script_message();
         }
+    }
+
+    /// Put the next waiting script message in the toast. False when none waits.
+    pub fn next_script_message(&mut self) -> bool {
+        let Some(m) = self.script_messages.pop_front() else { return false };
+        self.toast = Some((m.text.clone(), 0.0));
+        self.toast_script = Some(m);
+        true
     }
 
     /// Run a push button's JavaScript (its Mouse Up action).

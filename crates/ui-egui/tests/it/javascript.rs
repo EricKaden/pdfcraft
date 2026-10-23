@@ -70,6 +70,7 @@ fn console_runs_scripts_against_the_document() {
     assert!(h.state().js_console.log.is_empty(), "{:?} {:?}", h.state().js_console.log, h.state().dialog);
 }
 
+/// A button's script fills a field and its message takes the toast.
 #[test]
 fn button_scripts_run_and_alert() {
     let mut h = harness();
@@ -78,6 +79,36 @@ fn button_scripts_run_and_alert() {
     h.run_steps(2);
     assert_eq!(value(&h, "greeting"), ["Hello from JavaScript"]);
     assert_eq!(h.state().toast.clone().unwrap().0, "Filled in");
+}
+
+/// One run's messages are all shown, in order (#4294): the first takes the toast with its title
+/// and icon (#4293), the next takes it when the first is gone, and a notice shown meanwhile
+/// doesn't lose the ones still waiting.
+#[test]
+fn every_message_a_script_shows_takes_the_toast_in_turn() {
+    use pdfcraft_engine::js::{MessageButtons, MessageIcon};
+    let mut h = harness();
+    let id = h.state().active_ids().unwrap().1;
+    h.state_mut().run_button_script(id, "hello", "app.alert('First', 1, 0, 'Order form'); app.alert('Second', 3); app.alert('Third');");
+    h.run_steps(2);
+    let shown = |h: &Harness<'static, PdfCraftApp>| h.state().toast.clone().map(|t| t.0);
+    assert_eq!(shown(&h).as_deref(), Some("First"));
+    let m = h.state().toast_script.clone().expect("the toast shows the script's message");
+    assert_eq!((m.title.as_deref(), m.icon, m.buttons), (Some("Order form"), MessageIcon::Warning, MessageButtons::Ok));
+    assert!(h.query_by_label("Order form").is_some(), "the title is drawn");
+    assert_eq!(h.state().script_messages.len(), 2);
+    // The first is gone: the second takes its place, with its own icon and no title.
+    h.state_mut().toast = None;
+    h.run_steps(2);
+    assert_eq!(shown(&h).as_deref(), Some("Second"));
+    assert_eq!(h.state().toast_script.as_ref().map(|m| (m.title.clone(), m.icon)), Some((None, MessageIcon::Status)));
+    // A notice of the app's own replaces it; the third still follows.
+    h.state_mut().notify("Saved");
+    assert_eq!(h.state().toast_script, None);
+    h.state_mut().toast = None;
+    h.run_steps(2);
+    assert_eq!(shown(&h).as_deref(), Some("Third"));
+    assert!(h.state().script_messages.is_empty());
 }
 
 #[test]
