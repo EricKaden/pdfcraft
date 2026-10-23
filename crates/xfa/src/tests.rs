@@ -2373,6 +2373,31 @@ fn a_radio_button_sits_where_a_check_box_would() {
     }
 }
 
+/// A caption without a reserve leaves room for the box at the size it is drawn, a box larger than
+/// its field shrinking to fit; and a field without a height is as tall as that caption drawn in
+/// all the box leaves, not at some narrower width.
+#[test]
+fn a_check_box_caption_without_a_reserve_is_measured_as_it_is_drawn() {
+    let cap =
+        r#"<caption placement="left"><font typeface="Arial" size="9pt"/><value><text>Caption text running on one line</text></value></caption>"#;
+    let tall = r#"<field name="tall" x="0in" y="0in" w="1.5in" h="0.25in"><ui><checkButton size="0.75in"/></ui><font typeface="Arial" size="9pt"/>"#
+        .to_string()
+        + cap
+        + "<items><integer>1</integer><integer>0</integer></items></field>";
+    let form = layout_xml(&one_area_form(r#"layout="tb""#, &format!(r#"<subform name="body" layout="position" w="7.5in" h="1in">{tall}</subform>"#)))
+        .unwrap();
+    let r = widgets(&form.pages[0]).iter().find(|w| w.name == "tall").map(|w| w.rect).unwrap();
+    assert!((r.w - 18.0).abs() < 0.01, "the box shrinks to the field's height: {}", r.w);
+    assert!((r.x - 36.0 - 1.25 * 72.0).abs() < 0.01, "and still sits at the right: {} in", (r.x - 36.0) / 72.0);
+
+    let grows = r#"<field name="grows" w="3in"><ui><checkButton size="0.25in"/></ui><font typeface="Arial" size="9pt"/>"#.to_string()
+        + cap
+        + r#"<items><integer>1</integer><integer>0</integer></items></field><field name="next" w="3in" h="0.3in"><ui><textEdit/></ui></field>"#;
+    let form = layout_xml(&one_area_form(r#"layout="tb""#, &format!(r#"<subform name="body" layout="tb" w="7.5in">{grows}</subform>"#))).unwrap();
+    let next = widgets(&form.pages[0]).iter().find(|w| w.name == "next").map(|w| w.rect).unwrap();
+    assert!((next.y - 36.0 - 18.0).abs() < 0.01, "a one-line caption beside the box keeps the field the box's height: {}", next.y - 36.0);
+}
+
 /// A caption without a reserve beside a check box takes all the room the box leaves, and starts
 /// right after it; an inline caption has no text to run with and is not drawn.
 #[test]

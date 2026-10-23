@@ -1133,13 +1133,18 @@ impl Layouter<'_> {
         };
         match self.caption_reserve(f, inner_w, ctx) {
             Some((Placement::Top | Placement::Bottom, r)) => ui + r,
-            Some((_, r)) => {
+            Some((placement, r)) => {
+                // A check box's caption without a reserve is drawn in all the box leaves.
+                let w = match auto_check_reserve(f, placement, inner_w, None) {
+                    Some(auto) => auto,
+                    None => inner_w - r,
+                };
                 let cap = f.caption.as_ref().map(|c| {
                     let rich = match &c.value {
                         Value::Rich(r) => r.clone(),
                         other => text::plain(&other.plain().unwrap_or_default()),
                     };
-                    text::measure_height(&rich, (inner_w - r).max(1.0), &ctx.para.apply(&c.para), &Face::of(&ctx.font.apply(&c.font)), &|id, max| {
+                    text::measure_height(&rich, w.max(1.0), &ctx.para.apply(&c.para), &Face::of(&ctx.font.apply(&c.font)), &|id, max| {
                         self.embed(id, max)
                     })
                 });
@@ -1582,16 +1587,7 @@ impl Layouter<'_> {
         let inner = rect.inset(&f.common.margin);
         let (mut ui, mut cap_rect) = (inner, None);
         if let Some((placement, reserve)) = self.caption_reserve(f, inner.w, ctx) {
-            // Beside a check box, a caption without a reserve takes all the box leaves.
-            let reserve = if f.ui == Ui::CheckButton && f.caption.as_ref().is_some_and(|c| c.reserve.is_none()) {
-                let s = f.check_size.unwrap_or(10.0);
-                match placement {
-                    Placement::Top | Placement::Bottom => inner.h - s.min(inner.h),
-                    _ => inner.w - s.min(inner.w),
-                }
-            } else {
-                reserve
-            };
+            let reserve = auto_check_reserve(f, placement, inner.w, Some(inner.h)).unwrap_or(reserve);
             let r = reserve.max(0.0);
             match placement {
                 Placement::Top => {
@@ -1829,6 +1825,22 @@ impl Layouter<'_> {
             items,
         })))
     }
+}
+
+/// The room a caption without a reserve takes beside a check box: all the box leaves of a
+/// content area `w` wide (and `h` tall, when known), the box at the size it can be drawn there.
+/// `None` for any other field, or a caption with a reserve of its own.
+fn auto_check_reserve(f: &Field, placement: Placement, w: f64, h: Option<f64>) -> Option<f64> {
+    if f.ui != Ui::CheckButton || f.caption.as_ref().is_none_or(|c| c.reserve.is_some()) {
+        return None;
+    }
+    let s = f.check_size.unwrap_or(10.0).min(w.max(1.0)).min(h.map_or(f64::INFINITY, |h| h.max(1.0)));
+    let rest = match (placement, h) {
+        (Placement::Top | Placement::Bottom, Some(h)) => h - s,
+        (Placement::Top | Placement::Bottom, None) => return None,
+        _ => w - s,
+    };
+    Some(rest.max(0.0))
 }
 
 /// The widget's own border from the `<ui>` border element. Without one, a check box gets a
