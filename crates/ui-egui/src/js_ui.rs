@@ -88,12 +88,13 @@ impl PdfCraftApp {
     }
 
     /// Show form script messages `messages` in order, each in the toast with its title and icon.
-    /// The first takes the toast at once unless it shows another script message; the rest wait
-    /// their turn ([`Self::next_script_message`]).
+    /// The first takes the toast at once when it is free; otherwise it waits, like the rest, for
+    /// what the toast shows (another message, or a notice such as the run's own submit request)
+    /// to go ([`Self::next_script_message`]).
     pub fn show_script_messages(&mut self, messages: Vec<Message>) {
         let room = MAX_WAITING_MESSAGES.saturating_sub(self.script_messages.len());
         self.script_messages.extend(messages.into_iter().take(room));
-        if self.toast.is_none() || self.toast_script.is_none() {
+        if self.toast.is_none() {
             self.next_script_message();
         }
     }

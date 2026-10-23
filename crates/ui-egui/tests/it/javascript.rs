@@ -109,6 +109,18 @@ fn every_message_a_script_shows_takes_the_toast_in_turn() {
     h.run_steps(2);
     assert_eq!(shown(&h).as_deref(), Some("Third"));
     assert!(h.state().script_messages.is_empty());
+    // A notice the same run raises first (its submit request) isn't replaced: the message
+    // follows it.
+    h.state_mut().toast = None;
+    h.run_steps(2);
+    h.state_mut().run_button_script(id, "hello", "this.submitForm('https://example.com/form'); app.alert('Fourth');");
+    h.run_steps(2);
+    let notice = shown(&h).unwrap_or_default();
+    assert!(notice.contains("submitted"), "the submit notice stays: {notice}");
+    assert_eq!(h.state().script_messages.len(), 1);
+    h.state_mut().toast = None;
+    h.run_steps(2);
+    assert_eq!(shown(&h).as_deref(), Some("Fourth"));
 }
 
 #[test]
