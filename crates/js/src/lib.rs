@@ -146,6 +146,8 @@ pub struct DocInfo {
     pub info: Vec<(String, String)>,
     /// Whether the viewer highlights form fields (`app.runtimeHighlight`).
     pub highlight: bool,
+    /// The document has an XFA form, so scripts see `xfa_installed`.
+    pub xfa: bool,
 }
 
 /// Something a script asked the viewer to do.
@@ -992,8 +994,11 @@ fn color_object(ctx: &mut Context) -> JsObject {
     o.build()
 }
 
+/// The XFA version scripts see as `xfa_version`.
+const XFA_VERSION: f64 = 3.5;
+
 /// The AcroForm object model as globals: the document's methods and properties (`getField`,
-/// `numPages`, `info`, …), `app`, `util`, `console`, `display` and `color`.
+/// `numPages`, `info`, the XFA version, …), `app`, `util`, `console`, `display` and `color`.
 fn install(ctx: &mut Context) -> JsResult<()> {
     let globals: [(&str, usize, NativeFunction); 9] = [
         ("getField", 1, NativeFunction::from_fn_ptr(get_field)),
@@ -1014,9 +1019,9 @@ fn install(ctx: &mut Context) -> JsResult<()> {
     let nf = function(ctx, NativeFunction::from_fn_ptr(num_fields));
     let pg = function(ctx, NativeFunction::from_fn_ptr(page_num_get));
     let ps = function(ctx, NativeFunction::from_fn_ptr(page_num_set));
-    let (file, pages, info) = {
+    let (file, pages, info, xfa) = {
         let h = host(ctx)?.borrow();
-        (h.doc.file_name.clone(), h.doc.num_pages, h.doc.info.clone())
+        (h.doc.file_name.clone(), h.doc.num_pages, h.doc.info.clone(), h.doc.xfa)
     };
     let mut io = ObjectInitializer::new(ctx);
     for (k, v) in &info {
@@ -1029,6 +1034,12 @@ fn install(ctx: &mut Context) -> JsResult<()> {
     ctx.register_global_property(js_string!("numPages"), JsValue::from(pages as f64), rw)?;
     ctx.register_global_property(js_string!("documentFileName"), s(&file), rw)?;
     ctx.register_global_property(js_string!("info"), info, rw)?;
+    // XFA forms check both before they run: every document sees the XFA version, and only an
+    // XFA form sees `xfa_installed`.
+    ctx.register_global_property(js_string!("xfa_version"), JsValue::from(XFA_VERSION), rw)?;
+    if xfa {
+        ctx.register_global_property(js_string!("xfa_installed"), JsValue::from(true), rw)?;
+    }
 
     let highlight_get = function(ctx, NativeFunction::from_fn_ptr(runtime_highlight));
     let highlight_set = function(ctx, NativeFunction::from_fn_ptr(set_runtime_highlight));

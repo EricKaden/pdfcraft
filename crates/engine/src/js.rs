@@ -129,7 +129,9 @@ pub struct JsRunner {
 }
 
 impl JsRunner {
-    /// `highlight`: whether the viewer highlights form fields (`app.runtimeHighlight`).
+    /// A runner for `cos`: what scripts read about the document (pages, info, whether it is
+    /// an XFA form) and its document-level scripts, read once. `highlight`: whether the viewer
+    /// highlights form fields (`app.runtimeHighlight`).
     pub fn new(cos: &pdfcraft_cos::Document, file_name: &str, highlight: bool) -> JsRunner {
         let doc = pdfcraft_js::DocInfo {
             file_name: file_name.to_string(),
@@ -137,6 +139,7 @@ impl JsRunner {
             page: 0,
             info: info(cos),
             highlight,
+            xfa: pdfcraft_xfa::xfa_shape(cos).is_some(),
         };
         JsRunner {
             doc,
