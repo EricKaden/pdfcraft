@@ -2975,3 +2975,19 @@ fn long_names_repeated_by_an_index_are_capped() {
     let data = build_data(&doc, &fields);
     assert!(data.len() < 2_000_000, "{} bytes of data built", data.len());
 }
+
+/// Every instance of a repeating subform the layout makes is there to link to, even one that
+/// holds no field: `a` links to the third instance of a row of labels, whose label links to `z`.
+#[test]
+fn links_reach_every_instance_of_a_repeating_subform() {
+    let field = |n: &str, y: &str, link: &str| {
+        let t = if link.is_empty() { String::new() } else { format!(r#"<traversal><traverse ref="{link}"/></traversal>"#) };
+        format!(r#"<field name="{n}" x="0in" y="{y}" w="1.5in" h="0.3in"><ui><textEdit/></ui>{t}</field>"#)
+    };
+    let rows = r#"<subform name="rows" x="0in" y="2in" w="8in" h="2in" layout="tb">
+<subform name="row" layout="position" w="8in" h="0.4in"><occur min="1" max="5" initial="3"/>
+<draw x="0in" y="0in" w="2in" h="0.3in"><value><text>Row</text></value><traversal><traverse ref="z[0]"/></traversal></draw>
+</subform></subform>"#;
+    let body = [field("a", "0in", "rows[0].row[2]"), field("b", "1in", ""), rows.to_string(), field("z", "5in", "")].concat();
+    assert_eq!(widget_soms(&positioned_form(&body)), ["a[0]", "z[0]", "b[0]"]);
+}
