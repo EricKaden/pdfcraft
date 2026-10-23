@@ -2741,8 +2741,11 @@ fn widgets_are_written_in_the_templates_tab_order() {
             "C[0].C2[0]"
         ]
     );
-    assert_eq!(soms.first().map(String::as_str), Some("log[0]"), "{soms:?}");
-    assert!(soms.iter().any(|s| s == "D5[0]"), "{soms:?}");
+    // The protected widgets keep their places among the widgets: `log` first, as written, and
+    // `D5` 16th, between `D4` and `D6` in the order written, so after `finish` here.
+    assert_eq!(soms.iter().position(|s| s == "log[0]"), Some(0), "{soms:?}");
+    assert_eq!(soms.iter().position(|s| s == "D5[0]"), Some(15), "{soms:?}");
+    assert_eq!(soms.len(), 18, "{soms:?}");
 }
 
 /// Links to objects that aren't stops, as another viewer follows them: a hidden subform is
