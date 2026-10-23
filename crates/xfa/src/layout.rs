@@ -1089,6 +1089,10 @@ impl Layouter<'_> {
         if cap.value.is_empty() && cap.reserve.is_none() {
             return None;
         }
+        // A check box has no text for an inline caption to run with: it is not shown.
+        if f.ui == Ui::CheckButton && cap.placement == Placement::Inline {
+            return None;
+        }
         let placement = if cap.placement == Placement::Inline { Placement::Left } else { cap.placement };
         let font = ctx.font.apply(&cap.font);
         let para = ctx.para.apply(&cap.para);
@@ -1578,6 +1582,16 @@ impl Layouter<'_> {
         let inner = rect.inset(&f.common.margin);
         let (mut ui, mut cap_rect) = (inner, None);
         if let Some((placement, reserve)) = self.caption_reserve(f, inner.w, ctx) {
+            // Beside a check box, a caption without a reserve takes all the box leaves.
+            let reserve = if f.ui == Ui::CheckButton && f.caption.as_ref().is_some_and(|c| c.reserve.is_none()) {
+                let s = f.check_size.unwrap_or(10.0);
+                match placement {
+                    Placement::Top | Placement::Bottom => inner.h - s.min(inner.h),
+                    _ => inner.w - s.min(inner.w),
+                }
+            } else {
+                reserve
+            };
             let r = reserve.max(0.0);
             match placement {
                 Placement::Top => {
@@ -1715,12 +1729,21 @@ impl Layouter<'_> {
         let (kind, rect, border, value, tooltip) = match f.ui {
             Ui::CheckButton => {
                 let s = f.check_size.unwrap_or(10.0).min(ui.w.max(1.0)).min(ui.h.max(1.0));
-                let y = match fctx.para.v_align {
-                    VAlign::Top => ui.y + f.ui_margin.top,
-                    VAlign::Middle => ui.y + (ui.h - s) / 2.0,
-                    VAlign::Bottom => ui.bottom() - s - f.ui_margin.bottom,
+                // Without a caption the box sits at the right of the content area, as if a
+                // caption on its left took the rest, so the paragraph's alignment has no room to
+                // act on; beside a caption that alignment places it. The box's own margin doesn't
+                // move it.
+                let x = match (cap_rect, fctx.para.h_align) {
+                    (None, _) | (Some(_), HAlign::Right) => ui.right() - s,
+                    (Some(_), HAlign::Center) => ui.x + (ui.w - s) / 2.0,
+                    (Some(_), HAlign::Left | HAlign::Justify) => ui.x,
                 };
-                let r = Rect::new(ui.x + f.ui_margin.left, y, s, s);
+                let y = match fctx.para.v_align {
+                    VAlign::Top => ui.y,
+                    VAlign::Middle => ui.y + (ui.h - s) / 2.0,
+                    VAlign::Bottom => ui.bottom() - s,
+                };
+                let r = Rect::new(x, y, s, s);
                 let on = f.items.first().cloned().filter(|s| !s.trim().is_empty()).unwrap_or_else(|| "1".into());
                 let (kind, tip, checked) = match radio {
                     Some((group, on_value, tip, chosen)) => (
