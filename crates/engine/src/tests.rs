@@ -8102,6 +8102,21 @@ fn a_forms_layout_ready_scripts_run_once_it_is_laid_out() {
     assert!(s.take_js_output(id).requests.is_empty());
 }
 
+/// An edit's two script runtimes share one field highlight: a change an XFA script makes reaches
+/// the field scripts' runner, and one the field scripts make is what the next XFA script reads.
+#[test]
+fn an_edits_xfa_and_field_scripts_share_the_field_highlight() {
+    let cos = pdfcraft_cos::Document::open(Arc::new(fixture(1))).unwrap();
+    let mut cx = EditCtx::new(None, 0);
+    cx.js = Some(js::JsRunner::new(&cos, "synthetic.pdf", false));
+    cx.set_highlight(true);
+    assert!(cx.js.as_ref().is_some_and(|js| js.doc.highlight), "an XFA script's change reaches the field scripts");
+    if let Some(js) = cx.js.as_mut() {
+        js.doc.highlight = false;
+    }
+    assert!(!cx.highlight(), "the next XFA script reads the field scripts' change");
+}
+
 /// In a batch of XFA events, a later event's scripts read the field highlight an earlier one's set:
 /// `on`'s click turns it on, and `look`'s click, in the same batch, records what it reads.
 #[test]
