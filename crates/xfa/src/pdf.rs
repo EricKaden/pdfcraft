@@ -541,7 +541,6 @@ impl Emitter<'_> {
                         g.set(b"FT".to_vec(), Object::name("Btn"));
                         g.set(b"Ff".to_vec(), Object::Int((1 << 15) | (1 << 14)));
                         g.set(b"T".to_vec(), Object::String(PdfString::text(group)));
-                        self.taken.insert(group.clone());
                         g.set(b"V".to_vec(), Object::name("Off"));
                         g.set(b"DA".to_vec(), Object::String(PdfString::literal(Self::da(&w.face))));
                         g.set(b"Kids".to_vec(), Object::Array(Vec::new()));
@@ -613,8 +612,6 @@ impl Emitter<'_> {
         }
         if top_level {
             d.set(b"T".to_vec(), Object::String(PdfString::text(&w.name)));
-            // A signature field named by its SOM path must not repeat it.
-            self.taken.insert(w.name.clone());
         }
         let r = self.doc.add(Object::Dict(d));
         if top_level {
@@ -1047,6 +1044,14 @@ pub fn write_form(doc: &mut Document, form: &Form) -> Result<Written, XfaError> 
         taken,
         nodes: HashMap::new(),
     };
+    // Every name a field of this pass takes at the top, wherever and in whatever order it is
+    // written: a signature field named by its SOM path must not repeat one.
+    for w in form.pages.iter().flat_map(|p| &p.items).filter_map(|i| if let Item::Widget(w) = i { Some(w) } else { None }) {
+        em.taken.insert(match &w.kind {
+            WidgetKind::Radio { group, .. } => group.clone(),
+            _ => w.name.clone(),
+        });
+    }
     let mut kids = Vec::new();
     for page in &form.pages {
         kids.push(Object::Ref(em.page(page, pages_ref)?));
