@@ -240,6 +240,7 @@ pub fn scripted_template() -> String {
 /// and whose text field `note` has a click script, which a change of its value doesn't run.
 pub fn toggle_template() -> String {
     let js = "application/x-javascript";
+    // A script line that adds `what` (JavaScript), then ";", to the log field.
     let add = |what: &str| format!(r#"log.rawValue = (log.rawValue || "") + {what} + ";";"#);
     format!(
         r##"<?xml version="1.0" encoding="UTF-8"?>

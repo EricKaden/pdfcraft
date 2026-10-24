@@ -219,6 +219,7 @@ struct FieldInfo {
 
 /// The generated fields of `doc`, by name, as the runner tracks them.
 fn field_infos(doc: &pdfcraft_cos::Document) -> HashMap<String, FieldInfo> {
+    // The SOM path a widget or field records for its XFA object.
     let som_of = |obj: pdfcraft_cos::ObjRef| {
         let object = doc.get(obj);
         object.as_dict()?.get(pdfcraft_xfa::SOM_KEY).map(|s| doc.resolve(s))?.as_string().map(|s| s.to_text())

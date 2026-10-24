@@ -5088,6 +5088,7 @@ fn xfa_check_box_and_radio_button_clicks_run_their_click_scripts() {
     let bytes = Arc::new(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::toggle_template()));
     let mut s = Session::new();
     let id = s.open("toggle.pdf", None, bytes, None).expect("opens");
+    // What the scripts have written to the form's log field so far.
     let log = |s: &Session| s.get(id).unwrap().form.iter().find(|f| f.name == "log").and_then(|f| f.value.first().cloned()).unwrap_or_default();
     s.apply(id, Edit::SetFieldValue { name: "agree".into(), value: FieldValue::Check(true) }).unwrap();
     assert_eq!(log(&s), "change 1;click 1;", "change, then click, each seeing the new value");

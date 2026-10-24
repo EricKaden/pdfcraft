@@ -6843,6 +6843,7 @@ fn xfa_check_box_and_radio_clicks_run_through_form_fill() {
     std::fs::write(dir.join("toggle.pdf"), pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::toggle_template())).unwrap();
     let mut a = auto(&dir);
     let doc = ok(&mut a, "doc_open", json!({ "path": "toggle.pdf" }))["doc"].as_u64().unwrap();
+    // What the scripts have written to the form's log field so far.
     let log = |a: &mut Automation| {
         let f = ok(a, "form_fields", json!({ "doc": doc }));
         f["fields"]
