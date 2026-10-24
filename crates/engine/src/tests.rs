@@ -4741,6 +4741,50 @@ fn an_exit_skip_does_not_outlive_its_change() {
     assert_eq!(field_text(&s, id, "exits"), (before.parse::<u32>().unwrap() + 1).to_string(), "after another edit, the exit runs");
 }
 
+/// A focus event that changes nothing, batched with a form edit, doesn't cost the batch its edit.
+#[test]
+fn a_batch_keeps_its_edits_when_its_focus_event_changes_nothing() {
+    let mut s = Session::new();
+    let id = s.open("form.pdf", None, focus_form(), None).expect("opens");
+    let som = {
+        let doc = s.get(id).unwrap();
+        let quiet = doc.form.iter().find(|f| f.name == "quiet").unwrap();
+        crate::xfa::widget_som(&doc.editor.as_ref().unwrap().cos, quiet, 0).unwrap()
+    };
+    let batch = Edit::Batch {
+        label: "Fill and leave".into(),
+        edits: vec![
+            Edit::SetFieldValue { name: "quiet".into(), value: FieldValue::Text("z".into()) },
+            Edit::XfaEvent { som, activity: "exit".into() },
+        ],
+    };
+    s.apply(id, batch).unwrap();
+    assert_eq!(field_text(&s, id, "quiet"), "z", "the value is kept");
+    assert!(s.get(id).unwrap().dirty);
+}
+
+/// A field's exit is noted as run (for the focus loss to skip) only when an exit script ran:
+/// with every script skipped, as when the event's budget is spent or a script ran away, nothing
+/// is noted and the next focus loss runs the exit.
+#[test]
+fn on_changes_notes_only_the_exits_that_ran() {
+    let mut s = Session::new();
+    let id = s.open("form.pdf", None, focus_form(), None).expect("opens");
+    let doc = s.get(id).unwrap();
+    let mut cos = doc.editor.as_ref().unwrap().cos.clone();
+    let tpl = doc.xfa_template.clone().unwrap();
+    let names = vec!["probe".to_string()];
+    let mut exited = Vec::new();
+    let mut out = crate::js::JsOutput::default();
+    let mut stopped = crate::xfa::XfaRun { page_count: 1, out: &mut out, datasets: None, ran_away: true };
+    crate::xfa::on_changes(&mut cos, &tpl, &names, &mut stopped, &mut exited).unwrap();
+    assert!(exited.is_empty(), "no exit ran: {exited:?}");
+    let mut out = crate::js::JsOutput::default();
+    let mut running = crate::xfa::XfaRun { page_count: 1, out: &mut out, datasets: None, ran_away: false };
+    crate::xfa::on_changes(&mut cos, &tpl, &names, &mut running, &mut exited).unwrap();
+    assert_eq!(exited.len(), 1, "the exit ran: {exited:?}");
+}
+
 /// Scripts that change nothing leave no edit: the document stays saved, with nothing to undo,
 /// and what they showed still reaches the viewer. A field without such scripts runs nothing.
 #[test]

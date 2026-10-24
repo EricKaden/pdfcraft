@@ -839,12 +839,17 @@ pub(crate) fn on_changes(
         let som = r.by_som().iter().find(|(_, f)| *f == name).map(|(s, _)| s.clone());
         let Some(som) = som else { continue };
         let value = r.fields().get(name).map(|f| f.value.join("\n")).unwrap_or_default();
-        let exits = r.events_of(&som, "exit");
-        if !exits.is_empty() {
-            exited.push(som.clone());
-        }
-        for ev in r.events_of(&som, "change").into_iter().chain(exits) {
+        for ev in r.events_of(&som, "change") {
             r.run(&ev, &value)?;
+        }
+        // Noted only when an exit script ran: one the event's budget skipped, or one an error
+        // before it stopped, is still to run when the field loses focus.
+        let mut ran_exit = false;
+        for ev in r.events_of(&som, "exit") {
+            ran_exit |= r.run(&ev, &value)?.is_some();
+        }
+        if ran_exit {
+            exited.push(som.clone());
         }
         for ev in r.events_of(&som, "validate") {
             let Some(o) = r.run(&ev, &value)? else { continue };

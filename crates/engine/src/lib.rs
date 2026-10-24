@@ -3866,8 +3866,9 @@ impl Session {
         guard(|| run_edit(&mut next, &edit, &mut cx))
             .unwrap_or_else(|m| Err(EditError::Invalid(format!("{} failed unexpectedly ({m}); the document was not changed", edit.label()))))?;
         // A field's enter or exit scripts that changed nothing leave no edit behind (no undo step,
-        // nothing unsaved); what they showed or asked for still goes out.
-        if cx.xfa_unchanged {
+        // nothing unsaved); what they showed or asked for still goes out. Only an event on its own:
+        // a batch keeps the other edits it holds.
+        if cx.xfa_unchanged && matches!(edit, Edit::XfaEvent { .. }) {
             doc.js_output.append(cx.xfa_out);
             if cx.xfa_ran_away {
                 doc.xfa_template = None;
@@ -4037,6 +4038,7 @@ impl Session {
         Ok(())
     }
 
+    /// Undo the last edit of document `id`, keeping it for [`Session::redo`]. Returns its label.
     pub fn undo(&mut self, id: DocId) -> Result<Label, EditError> {
         let doc = self.doc_mut(id)?;
         let editor = doc.editor.as_mut().ok_or(EditError::NothingToUndo)?;
@@ -4068,6 +4070,7 @@ impl Session {
         Ok(label)
     }
 
+    /// Redo the last edit of document `id` that [`Session::undo`] took back. Returns its label.
     pub fn redo(&mut self, id: DocId) -> Result<Label, EditError> {
         let doc = self.doc_mut(id)?;
         let editor = doc.editor.as_mut().ok_or(EditError::NothingToRedo)?;
