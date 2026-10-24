@@ -459,6 +459,27 @@ pub fn has_scripts(tpl: &Template) -> bool {
     any(&tpl.root.scripts) || walk(&tpl.root.children, 1) || tpl.root.page_set.as_ref().is_some_and(|ps| ps.areas.iter().any(|a| walk(&a.items, 1)))
 }
 
+/// Does any field of the template (in the body, an exclusion group or a master page) have an
+/// `enter` or `exit` script? Forms without one have nothing to run when the focus moves.
+pub fn has_focus_scripts(tpl: &Template) -> bool {
+    /// Has field `f` a non-blank enter or exit script?
+    fn field(f: &Field) -> bool {
+        f.scripts.iter().any(|s| matches!(s.activity.as_str(), "enter" | "exit") && !s.text.trim().is_empty())
+    }
+    /// Has any field among `nodes` (and their containers, `depth` levels down) one?
+    fn walk(nodes: &[Node], depth: usize) -> bool {
+        depth <= MAX_DEPTH
+            && nodes.iter().any(|n| match n {
+                Node::Subform(sf) => walk(&sf.children, depth + 1),
+                Node::Area(a) => walk(&a.children, depth + 1),
+                Node::Field(f) => field(f),
+                Node::ExclGroup(g) => g.fields.iter().any(field),
+                Node::Draw(_) => false,
+            })
+    }
+    walk(&tpl.root.children, 1) || tpl.root.page_set.as_ref().is_some_and(|ps| ps.areas.iter().any(|a| walk(&a.items, 1)))
+}
+
 /// The template with `ov` applied to its objects (instance 0 of each; scripts that hide one
 /// instance of a repeating subform hide them all).
 pub fn apply_overrides(tpl: &Template, ov: &Overrides) -> Template {

@@ -696,6 +696,32 @@ impl Automation {
         Ok(json!({ "field": a.str("field")?, "event": a.str("event")?, "console": out.console, "errors": out.errors }))
     }
 
+    /// `form_focus`: field `field` (its 1-based `widget`) gains (`enter`) or loses (`exit`)
+    /// focus, running its XFA scripts for that event; returns whether the form changed and what
+    /// the scripts showed or asked for.
+    pub(crate) fn form_focus(&mut self, a: &Args) -> Result<Value> {
+        use pdfcraft_engine::js::FieldFocus;
+        let focus = match a.str("event")? {
+            "enter" => FieldFocus::Enter,
+            "exit" => FieldFocus::Exit,
+            other => return Err(ToolError::InvalidArgs(format!("event must be enter or exit, not {other:?}"))),
+        };
+        let name = a.str("field")?;
+        let doc = self.doc(a)?;
+        let field = doc.form.iter().find(|f| f.name == name).ok_or_else(|| failed(format!("there is no field named {name:?} (see form_fields)")))?;
+        let widget = a.opt_int("widget")?.unwrap_or(1);
+        let widget = usize::try_from(widget)
+            .ok()
+            .and_then(|w| w.checked_sub(1))
+            .filter(|w| *w < field.widgets.len().max(1))
+            .ok_or_else(|| ToolError::InvalidArgs(format!("widget must be 1 to {} for {name:?}", field.widgets.len().max(1))))?;
+        let id = doc.id;
+        let changed = self.session.field_focus(id, name, widget, focus).map_err(failed)?;
+        let out = self.session.take_js_output(id);
+        let reqs: Vec<Value> = out.requests.iter().map(request_json).collect();
+        Ok(json!({ "changed": changed, "alerts": out.alerts, "console": out.console, "requests": reqs, "errors": out.errors }))
+    }
+
     pub(crate) fn form_merge_data(&mut self, a: &Args) -> Result<Value> {
         let mut files = Vec::new();
         for p in a.strs("paths")? {

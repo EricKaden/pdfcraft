@@ -4675,6 +4675,88 @@ fn measurement_edits_are_transactional_and_honour_annotation_permissions() {
     );
 }
 
+/// The synthetic focus form ([`pdfcraft_xfa::fixtures::focus_template`]).
+fn focus_form() -> Arc<Vec<u8>> {
+    Arc::new(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::focus_template()))
+}
+
+/// The value of field `name` in document `id`.
+fn field_text(s: &Session, id: DocId, name: &str) -> String {
+    s.get(id).and_then(|d| d.form.iter().find(|f| f.name == name).and_then(|f| f.value.first().cloned())).unwrap_or_default()
+}
+
+/// A field's exit scripts run every time it loses focus, changed or not, and its enter scripts
+/// every time it gains it; each run that changes the form is one undo step.
+#[test]
+fn xfa_enter_and_exit_scripts_run_on_every_focus_change() {
+    use crate::js::FieldFocus::{Enter, Exit};
+    let mut s = Session::new();
+    let id = s.open("form.pdf", None, focus_form(), None).expect("opens");
+    for _ in 0..3 {
+        assert!(s.field_focus(id, "probe", 0, Enter).unwrap(), "the enter script counted");
+        assert!(s.field_focus(id, "probe", 0, Exit).unwrap(), "the exit script counted");
+    }
+    assert_eq!((field_text(&s, id, "exits"), field_text(&s, id, "enters")), ("3".into(), "3".into()));
+    assert!(s.get(id).unwrap().dirty);
+    s.undo(id).unwrap();
+    assert_eq!(field_text(&s, id, "exits"), "2", "each run is its own undo step");
+}
+
+/// A value typed into a field runs its exit with the change; losing focus then doesn't run it
+/// again. The next visit runs it as usual.
+#[test]
+fn an_exit_the_fields_change_ran_does_not_run_twice() {
+    use crate::js::FieldFocus::{Enter, Exit};
+    let mut s = Session::new();
+    let id = s.open("form.pdf", None, focus_form(), None).expect("opens");
+    s.field_focus(id, "probe", 0, Enter).unwrap();
+    s.apply(id, Edit::SetFieldValue { name: "probe".into(), value: FieldValue::Text("x".into()) }).unwrap();
+    assert_eq!(field_text(&s, id, "exits"), "1", "the change ran the exit");
+    assert!(!s.field_focus(id, "probe", 0, Exit).unwrap(), "not again on losing focus");
+    assert_eq!(field_text(&s, id, "exits"), "1");
+    s.field_focus(id, "probe", 0, Enter).unwrap();
+    s.field_focus(id, "probe", 0, Exit).unwrap();
+    assert_eq!(field_text(&s, id, "exits"), "2", "the next visit's exit runs");
+}
+
+/// Scripts that change nothing leave no edit: the document stays saved, with nothing to undo,
+/// and what they showed still reaches the viewer. A field without such scripts runs nothing.
+#[test]
+fn focus_scripts_that_change_nothing_leave_the_document_clean() {
+    use crate::js::FieldFocus::{Enter, Exit};
+    let mut s = Session::new();
+    let id = s.open("form.pdf", None, focus_form(), None).expect("opens");
+    s.field_focus(id, "quiet", 0, Enter).unwrap();
+    assert!(!s.field_focus(id, "quiet", 0, Exit).unwrap(), "nothing changed");
+    let doc = s.get(id).unwrap();
+    assert!(!doc.dirty && doc.can_undo().is_none(), "no edit kept");
+    let out = s.take_js_output(id);
+    assert_eq!(out.alerts.iter().map(String::as_str).collect::<Vec<_>>(), ["left quiet"]);
+    // A field without focus scripts, and a field that doesn't exist.
+    assert!(!s.field_focus(id, "exits", 0, Exit).unwrap());
+    assert!(!s.field_focus(id, "nowhere", 0, Enter).unwrap());
+    assert!(!s.get(id).unwrap().dirty);
+}
+
+/// Each radio button of a group is a field of its own: reaching the second button runs its
+/// enter script, reaching the first (which has none) runs nothing. Choosing the button changes
+/// the group's value, which runs the group's scripts, not the button's: leaving the button
+/// still runs its exit.
+#[test]
+fn a_radio_buttons_own_focus_scripts_run() {
+    use crate::js::FieldFocus::{Enter, Exit};
+    let mut s = Session::new();
+    let id = s.open("form.pdf", None, focus_form(), None).expect("opens");
+    let group = s.get(id).unwrap().form.iter().find(|f| f.widgets.len() == 2).map(|f| f.name.clone()).expect("the radio group");
+    assert!(!s.field_focus(id, &group, 0, Enter).unwrap(), "the first button has no enter script");
+    assert!(s.field_focus(id, &group, 1, Enter).unwrap(), "the second button's ran");
+    assert!(!s.field_focus(id, &group, 2, Enter).unwrap(), "there is no third button");
+    assert_eq!(field_text(&s, id, "picks"), "1");
+    s.apply(id, Edit::SetFieldValue { name: group.clone(), value: FieldValue::Radio(Some("L".into())) }).unwrap();
+    assert!(s.field_focus(id, &group, 1, Exit).unwrap(), "the button's exit runs on leaving it");
+    assert_eq!(field_text(&s, id, "drops"), "1");
+}
+
 #[test]
 fn dynamic_xfa_forms_are_laid_out_on_open_filled_and_saved_incrementally() {
     let original = Arc::new(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::template(3)));

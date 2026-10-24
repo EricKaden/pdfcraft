@@ -146,6 +146,48 @@ fn xfa_buttons_run_their_scripts_in_the_app() {
     assert!(h.query_by_label_contains("Hello 2").is_some(), "script console: {:?}", h.state().js_console.log);
 }
 
+/// Every way the focus moves (a click, Tab, Shift+Tab, Escape) runs the field it left's exit
+/// script and the field it reached's enter script, changed or not; typing a change and tabbing
+/// out runs the exit once, not twice. A script's message shows as a notice.
+#[test]
+fn xfa_enter_and_exit_scripts_run_whenever_the_focus_moves() {
+    use egui::{Key, Modifiers};
+    let mut h = open(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::focus_template()));
+    wait_for_pages(&mut h);
+    let counts = |h: &Harness<'static, PdfCraftApp>| {
+        let s = h.state();
+        let doc = s.session.get(s.views[0].id).unwrap();
+        let v = |n: &str| doc.form.iter().find(|f| f.name == n).and_then(|f| f.value.first().cloned()).unwrap_or_default();
+        (v("enters"), v("exits"))
+    };
+    let focus = |h: &Harness<'static, PdfCraftApp>| h.state().views[0].forms.focus.as_ref().map(|f| f.name.clone());
+    let press = |h: &mut Harness<'static, PdfCraftApp>, modifiers, key| {
+        h.key_press_modifiers(modifiers, key);
+        h.run_steps(4);
+    };
+    click_field(&mut h, "probe");
+    assert_eq!(counts(&h), ("1".into(), "0".into()), "a click in runs the enter");
+    for _ in 0..2 {
+        press(&mut h, Modifiers::NONE, Key::Tab);
+        assert_eq!(focus(&h).as_deref(), Some("quiet"));
+        press(&mut h, Modifiers::SHIFT, Key::Tab);
+        assert_eq!(focus(&h).as_deref(), Some("probe"));
+    }
+    press(&mut h, Modifiers::NONE, Key::Escape);
+    assert_eq!(focus(&h), None);
+    assert_eq!(counts(&h), ("3".into(), "3".into()), "three unchanged visits, three exits; console: {:?}", h.state().js_console.log);
+    // A change typed in: tabbing out runs the exit once.
+    click_field(&mut h, "probe");
+    h.event(egui::Event::Text("typed".into()));
+    h.run_steps(2);
+    press(&mut h, Modifiers::NONE, Key::Tab);
+    assert_eq!(counts(&h), ("4".into(), "4".into()));
+    // Leaving `quiet` shows its message.
+    assert_eq!(focus(&h).as_deref(), Some("quiet"));
+    press(&mut h, Modifiers::NONE, Key::Escape);
+    assert!(h.query_by_label_contains("left quiet").is_some(), "console: {:?}", h.state().js_console.log);
+}
+
 #[test]
 fn messages_from_scripts_run_on_open_show_right_away() {
     let tpl = pdfcraft_xfa::fixtures::scripted_template()

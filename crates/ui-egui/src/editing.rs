@@ -252,6 +252,9 @@ impl PdfCraftApp {
     pub(crate) fn process_pending_edits(&mut self) -> bool {
         let Some(i) = self.active else { return true };
         let applied = self.apply_queued_edit(i);
+        // After the queued edit: a value typed into the field the focus left has been taken (and
+        // its change has run the field's exit) before the focus scripts run.
+        self.run_focus_scripts(i);
         if !applied {
             // Nor may a shortcut pressed with it (⌘S right after Enter) run behind the refusal.
             self.deferred_commands.clear();
@@ -465,6 +468,37 @@ impl PdfCraftApp {
             view.forms.focus = Some(draft);
         }
         false
+    }
+
+    /// XFA enter and exit scripts for where the focus went on tab `i` since it was last looked at,
+    /// however it moved (a click, Tab or Shift+Tab, Escape, a click on the page, a script): the
+    /// field it left runs its exit, then the field it reached runs its enter. The engine skips an
+    /// exit the field's committed change already ran. A tab that closes runs nothing: its
+    /// document is going away, and a script changing it then would only ask to save it.
+    fn run_focus_scripts(&mut self, i: usize) {
+        let Some(view) = self.views.get_mut(i) else { return };
+        let now = view.forms.focus.as_ref().map(|f| (f.name.clone(), f.widget));
+        if view.forms.focused == now {
+            return;
+        }
+        let left = std::mem::replace(&mut view.forms.focused, now.clone());
+        let id = view.id;
+        use pdfcraft_engine::js::FieldFocus;
+        for ((name, widget), focus) in [left.map(|l| (l, FieldFocus::Exit)), now.map(|n| (n, FieldFocus::Enter))].into_iter().flatten() {
+            match self.session.field_focus(id, &name, widget, focus) {
+                Ok(changed) => {
+                    if changed
+                        && let Some(info) = self.session.get(id).map(|d| d.info.clone())
+                        && let Some(view) = self.views.get_mut(i)
+                    {
+                        view.document_changed(&info);
+                    }
+                    let out = self.session.take_js_output(id);
+                    self.handle_js(id, out);
+                }
+                Err(e) => self.notify_error(e),
+            }
+        }
     }
 
     /// Apply the edit queued on tab `i` (the active one). Returns false only when it was a

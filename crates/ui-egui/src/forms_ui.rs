@@ -67,6 +67,10 @@ pub struct FormView {
     /// The widget holding egui's keyboard focus for the focused check box or radio button, and
     /// whether it takes the arrows (radio buttons). The page keys still work around it.
     pub(crate) keys: Option<(egui::Id, bool)>,
+    /// The field and widget that had focus when it was last looked at: when the focus moves, the
+    /// one it left runs its XFA exit scripts and the one it reached its enter scripts
+    /// (`PdfCraftApp::run_focus_scripts`).
+    pub(crate) focused: Option<(String, usize)>,
 }
 
 /// A form message for the app to show, with document data kept separate so the visible
