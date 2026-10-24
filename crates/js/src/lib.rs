@@ -758,12 +758,22 @@ fn page_num_set(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<Js
 
 /// A message argument: a string, or an object with `cMsg`, cut to a message's length.
 fn message(v: &JsValue, key: &str, ctx: &mut Context) -> JsResult<String> {
-    match v.as_object() {
-        Some(o) if !o.is_array() && !o.is_callable() => {
+    match named_params(v, key, ctx)? {
+        Some(o) => {
             let m = o.get(JsString::from(key), ctx)?;
             text_line(&m, ctx)
         }
-        _ => text_line(v, ctx),
+        None => text_line(v, ctx),
+    }
+}
+
+/// `v` as a method's single object of named parameters: an object (not an array or function)
+/// that has `key`, the parameter every such call names. Any other value, a `new String(…)` or a
+/// caught `Error` included, is the first positional argument, read as text.
+fn named_params(v: &JsValue, key: &str, ctx: &mut Context) -> JsResult<Option<JsObject>> {
+    match v.as_object() {
+        Some(o) if !o.is_array() && !o.is_callable() && o.has_property(JsString::from(key), ctx)? => Ok(Some(o.clone())),
+        _ => Ok(None),
     }
 }
 
@@ -785,12 +795,12 @@ fn code(v: &JsValue, ctx: &mut Context) -> Option<f64> {
 /// the JavaScript for Acrobat API Reference allows for every method with named parameters).
 pub(crate) fn alert_message(args: &[JsValue], ctx: &mut Context) -> JsResult<Message> {
     let first = arg(args, 0);
-    let (text, icon, buttons, t) = match first.as_object() {
-        Some(o) if !o.is_array() && !o.is_callable() => {
+    let (text, icon, buttons, t) = match named_params(&first, "cMsg", ctx)? {
+        Some(o) => {
             let get = |k: &str, ctx: &mut Context| o.get(JsString::from(k), ctx);
             (get("cMsg", ctx)?, get("nIcon", ctx)?, get("nType", ctx)?, get("cTitle", ctx)?)
         }
-        _ => (first, arg(args, 1), arg(args, 2), arg(args, 3)),
+        None => (first, arg(args, 1), arg(args, 2), arg(args, 3)),
     };
     Ok(Message {
         text: text_line(&text, ctx)?,

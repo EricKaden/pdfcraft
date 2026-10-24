@@ -319,6 +319,17 @@ fn app_alert_reads_the_object_form() {
     assert_eq!(alerted("{ cMsg: 'Done' }"), Message::plain("Done"));
 }
 
+/// An object without `cMsg` isn't the object form: it is the message itself, as text, so a
+/// String object or a caught error shows what it says; the same for `app.launchURL` and `cURL`.
+#[test]
+fn objects_that_name_no_parameter_are_the_message_itself() {
+    assert_eq!(alerted("new String('Saved')"), Message::plain("Saved"));
+    let o = go("try { throw new Error('No such field'); } catch (e) { app.alert(e); }", &Event::field("Mouse Up", "agree", ""));
+    assert_eq!(o.alerts.first().map(|m| m.text.as_str()), Some("Error: No such field"), "{o:?}");
+    let o = go("app.launchURL(new String('https://example.com/form'));", &Event::field("Mouse Up", "agree", ""));
+    assert_eq!(o.requests, vec![Request::LaunchUrl("https://example.com/form".into())], "{o:?}");
+}
+
 /// An icon or button number that isn't one of the four (fractional, negative, too large, not a
 /// number, or a value that can't be converted) is the default, and the message still shows;
 /// a number given as text counts.
