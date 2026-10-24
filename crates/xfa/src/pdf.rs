@@ -362,6 +362,11 @@ impl Emitter<'_> {
         if w.read_only {
             ff |= 1;
         }
+        // Required, which viewers outline when they highlight a form's fields. A radio button's
+        // flags are its group's: the group takes it below.
+        if w.required && !matches!(w.kind, WidgetKind::Radio { .. }) {
+            ff |= 1 << 1;
+        }
         let mut top_level = true;
         match &w.kind {
             WidgetKind::Text | WidgetKind::Date(_) | WidgetKind::Password => {
@@ -496,7 +501,8 @@ impl Emitter<'_> {
                     None => {
                         let mut g = Dict::new();
                         g.set(b"FT".to_vec(), Object::name("Btn"));
-                        g.set(b"Ff".to_vec(), Object::Int((1 << 15) | (1 << 14)));
+                        let required = if w.required { 1 << 1 } else { 0 };
+                        g.set(b"Ff".to_vec(), Object::Int((1 << 15) | (1 << 14) | required));
                         g.set(b"T".to_vec(), Object::String(PdfString::text(group)));
                         g.set(b"V".to_vec(), Object::name("Off"));
                         g.set(b"DA".to_vec(), Object::String(PdfString::literal(Self::da(&w.face))));

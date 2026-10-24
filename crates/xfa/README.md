@@ -25,7 +25,7 @@ that warning and keeps the existing layout and accepted widget values.
   margins, borders (edge order rules), captions with reserves, check-button items, pictures,
   rich text (`exData` XHTML: paragraphs, `br`, bold/italic/underline/size spans, embedded fields),
   text-field limits (`text/maxChars` and `exData/maxLength`, carried into AcroForm `/MaxLen`),
-  inline JPEG, PNG and GIF images, lines, rectangles, occurrences, `breakBefore`/`breakAfter`, overflow
+  required fields and exclusion groups (`<validate nullTest="error">`), inline JPEG, PNG and GIF images, lines, rectangles, occurrences, `breakBefore`/`breakAfter`, overflow
   leaders, `columnWidths` and `colSpan`.
 - **Layout** (`layout`): positioned, `tb`, `lr-tb`/`rl-tb`, `table` and `row` layouts; a
   container without a width is as wide as its content; flow across content areas and pages with
@@ -38,7 +38,9 @@ that warning and keeps the existing layout and accepted widget values.
   XObjects, and widgets: text (multi-line, max length, alignment), date (Acrobat's `AFDate`
   format and keystroke actions from the picture clause), check boxes and radio groups (from
   `exclGroup`), push buttons with Reset / Print / Save As / URI actions recognised from their
-  scripts. Appearance streams are left empty for the forms layer to generate. Each field keeps
+  scripts. A field or exclusion group that must be filled in gets the `Required` flag (a radio
+  group on its group field), which viewers outline when they highlight fields. Appearance
+  streams are left empty for the forms layer to generate. Each field keeps
   its SOM path in `/PCSom`; the AcroForm gets `/PCXfaLayout` so a saved form is not laid out
   twice. The XFA packets stay, so Adobe's viewers keep rendering the form from them.
 

@@ -168,6 +168,8 @@ pub struct Widget {
     pub items: Vec<String>,
     /// A text field that doesn't scroll: it takes no more text than it shows (`DoNotScroll`).
     pub no_scroll: bool,
+    /// The field must be filled in (`Required`); a radio button, when its group must be.
+    pub required: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -1799,6 +1801,15 @@ impl Layouter<'_> {
                 let on = f.items.first().cloned().filter(|s| !s.trim().is_empty()).unwrap_or_else(|| (i + 1).to_string());
                 let tip = f.tooltip.clone().or_else(|| g.tooltip.clone());
                 let chosen = selected.as_deref() == Some(on.as_str());
+                // A group that must be answered makes each of its buttons required, as the group
+                // field they make is.
+                let required;
+                let f = if g.required && !f.required {
+                    required = Field { required: true, ..f.clone() };
+                    &required
+                } else {
+                    f
+                };
                 self.draw_field(f, Rect::new(inner.x + r.x, inner.y + r.y, r.w, r.h), &ctx, Some((&group, &on, tip, chosen)), sibs.at(i))?;
             }
         }
@@ -2087,6 +2098,7 @@ impl Layouter<'_> {
             action,
             items,
             no_scroll: f.no_scroll,
+            required: f.required,
         })))
     }
 }

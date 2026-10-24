@@ -547,9 +547,16 @@ fn parse_field(n: XmlNode, warnings: &mut Vec<String>) -> Field {
         calculate: child(n, "calculate").and_then(|c| child(c, "script")).map(|s| parse_script(s, "calculate")),
         validate: validate_el.and_then(|v| child(v, "script")).map(|s| parse_script(s, "validate")),
         validate_message,
+        required: must_be_filled(validate_el),
         numeric,
         display_picture: child(n, "format").and_then(|f| child(f, "picture")).map(text_of).map(|p| p.trim().to_string()).filter(|p| !p.is_empty()),
     }
+}
+
+/// Whether a `<validate>` element makes its object one that must be filled in: `nullTest="error"`
+/// (`warning` only recommends it, and `disabled`, the default, leaves it optional).
+fn must_be_filled(validate: Option<XmlNode>) -> bool {
+    validate.is_some_and(|v| v.attribute("nullTest").is_some_and(|t| t.trim() == "error"))
 }
 
 fn parse_script(s: XmlNode, activity: &str) -> Script {
@@ -674,6 +681,7 @@ fn parse_node(c: XmlNode, warnings: &mut Vec<String>, depth: usize) -> Option<No
             fields: children(c, "field").map(|f| parse_field(f, warnings)).collect(),
             tooltip: child(c, "assist").and_then(|a| child(a, "toolTip")).map(text_of).map(|t| t.trim().to_string()).filter(|t| !t.is_empty()),
             scripts: parse_events(c),
+            required: must_be_filled(child(c, "validate")),
         })),
         _ => return None,
     })
