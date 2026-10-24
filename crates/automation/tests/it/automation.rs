@@ -6833,6 +6833,33 @@ fn xfa_scripts_run_for_buttons_and_field_changes_through_tools() {
     assert_eq!(r["alerts"], json!(["Hello 4"]));
 }
 
+/// Filling an XFA check box or radio group through form_fill clicks it, as the app does: the
+/// field's change scripts, then the click scripts of what was clicked.
+#[test]
+fn xfa_check_box_and_radio_clicks_run_through_form_fill() {
+    let dir = workdir("xfa-toggle");
+    std::fs::write(dir.join("toggle.pdf"), pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::toggle_template())).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "toggle.pdf" }))["doc"].as_u64().unwrap();
+    let log = |a: &mut Automation| {
+        let f = ok(a, "form_fields", json!({ "doc": doc }));
+        f["fields"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|f| f["name"] == "log")
+            .map(|f| f["value"].as_str().unwrap_or_default().to_string())
+            .unwrap_or_default()
+    };
+    ok(&mut a, "form_fill", json!({ "doc": doc, "values": { "agree": true } }));
+    assert_eq!(log(&mut a), "change 1;click 1;");
+    let fields = ok(&mut a, "form_fields", json!({ "doc": doc }));
+    let answer = fields["fields"].as_array().unwrap().iter().find(|f| f["name"] == "answer").cloned().expect("the radio group");
+    let no = answer["options"].as_array().and_then(|o| o.get(1)).and_then(|o| o.as_str().map(str::to_string)).unwrap_or_else(|| panic!("{answer}"));
+    ok(&mut a, "form_fill", json!({ "doc": doc, "values": { "answer": no } }));
+    assert!(log(&mut a).ends_with("no click;"), "{}", log(&mut a));
+}
+
 #[test]
 fn doc_info_says_when_a_runaway_script_turned_the_forms_scripts_off() {
     let dir = workdir("xfa-scripts-off");
