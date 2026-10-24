@@ -3604,6 +3604,12 @@ fn a_layout_ready_event_is_told_apart_from_form_ready() {
     assert!(!js("that.this.rawValue = xfa.layout.page(this);"), "not the script's own field");
     assert!(formcalc("$ =\n xfa.layout.page($)"));
     assert!(!formcalc("$record.x = xfa.layout.page($)"), "not the field");
+    // A hostile script (a bracket left open, then a name repeated many times) is read in bounded
+    // time: each expression stops at its length cap, and only so many places are looked at.
+    let hostile = "$ = (\n".repeat(200_000);
+    let started = std::time::Instant::now();
+    assert!(!formcalc(&hostile));
+    assert!(started.elapsed() < std::time::Duration::from_secs(2), "took {:?}", started.elapsed());
 }
 
 /// `typed_date` rewrites a date typed by another of a field's edit-picture patterns in the first

@@ -705,6 +705,11 @@ fn own_page_role(script: &str, formcalc: bool) -> Option<PageRole> {
     }
 }
 
+/// Most places a name is looked at as an assignment to the script's own field ([`own_assignments`]).
+const MAX_ASSIGNMENTS: usize = 256;
+/// Most bytes of an assignment's expression read ([`expression`]); a page-number expression is short.
+const MAX_EXPRESSION: usize = 4096;
+
 /// What the statements of `code` assign to the script's own field: the expression after `=` of
 /// each `this.rawValue = …` (in FormCalc also `$.rawValue = …` and `$ = …`) that starts a
 /// statement. The expression runs to a `;` (JavaScript) or to the end of a line that completes it:
@@ -715,7 +720,9 @@ fn own_assignments(code: &str, formcalc: bool) -> Vec<&str> {
     let ident = |c: char| c.is_alphanumeric() || c == '_' || c == '$' || c == '.';
     let mut out = Vec::new();
     for t in targets {
-        for (i, _) in code.match_indices(t) {
+        // At most MAX_ASSIGNMENTS places looked at per name, each expression read at most
+        // MAX_EXPRESSION bytes: a hostile script can't make this scan quadratic.
+        for (i, _) in code.match_indices(t).take(MAX_ASSIGNMENTS) {
             // A statement's start: nothing before it on its line but spaces, or a `;`, `{` or `}`.
             let before = code.get(..i).unwrap_or_default().trim_end_matches([' ', '\t']);
             if !(before.is_empty() || before.ends_with(['\n', '\r', ';', '{', '}'])) {
@@ -737,6 +744,9 @@ fn own_assignments(code: &str, formcalc: bool) -> Vec<&str> {
 /// JavaScript, or to a line break once something is written, the brackets are closed and the
 /// line doesn't end in an operator that continues it.
 fn expression(rhs: &str, formcalc: bool) -> &str {
+    // Read no further than MAX_EXPRESSION bytes (cut at a character boundary).
+    let cap = (0..=MAX_EXPRESSION.min(rhs.len())).rev().find(|&n| rhs.is_char_boundary(n)).unwrap_or(0);
+    let rhs = rhs.get(..cap).unwrap_or_default();
     let mut depth = 0i32;
     let mut last: Option<char> = None;
     for (j, c) in rhs.char_indices() {
