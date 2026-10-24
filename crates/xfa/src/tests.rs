@@ -339,7 +339,8 @@ fn rendering_into_the_pdf_replaces_the_placeholder_page_and_adds_fields() {
 
 /// A field or exclusion group that must be filled in (`<validate nullTest="error">`) becomes a
 /// Required field, which viewers outline when they highlight a form's fields: a radio group on the
-/// group field, its buttons' flags being the group's. `nullTest="warning"` only recommends a value,
+/// group field, its buttons' flags being the group's (a button of its own that must be chosen
+/// makes the group required too). `nullTest="warning"` only recommends a value,
 /// so it, like no test, leaves the field optional.
 #[test]
 fn fields_that_must_be_filled_in_are_required() {
@@ -356,6 +357,10 @@ fn fields_that_must_be_filled_in_are_required() {
 </exclGroup>
 <exclGroup name="optional" layout="lr-tb">
  <field name="a" w="1in" h="0.3in"><ui><checkButton shape="round"/></ui><items><text>A</text></items></field>
+</exclGroup>
+<exclGroup name="second" layout="lr-tb">
+ <field name="b" w="1in" h="0.3in"><ui><checkButton shape="round"/></ui><items><text>B</text></items></field>
+ <field name="c" w="1in" h="0.3in"><ui><checkButton shape="round"/></ui><items><text>C</text></items><validate nullTest="error"/></field>
 </exclGroup>
 </subform></template></xdp:xdp>"##;
     let mut doc = Document::open(Arc::new(shell(xdp))).unwrap();
@@ -378,6 +383,7 @@ fn fields_that_must_be_filled_in_are_required() {
     assert_eq!(leaf("agree"), Some(true), "a check box too");
     assert_eq!(leaf("answer"), Some(true), "the radio group field");
     assert_eq!(leaf("optional"), Some(false));
+    assert_eq!(leaf("second"), Some(true), "a later button that must be chosen makes its group required");
 }
 
 /// A dynamic form's own text that the standard fonts can't draw is laid out anyway and reported

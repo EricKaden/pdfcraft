@@ -497,7 +497,17 @@ impl Emitter<'_> {
             WidgetKind::Radio { group, on, .. } => {
                 top_level = false;
                 let parent = match self.radio_groups.get(group) {
-                    Some((p, _)) => *p,
+                    Some((p, _)) => {
+                        let p = *p;
+                        // A later button that must be chosen makes the group required too.
+                        if w.required {
+                            self.doc.update_dict(p, |g| {
+                                let ff = g.int(b"Ff").unwrap_or(0);
+                                g.set(b"Ff".to_vec(), Object::Int(ff | (1 << 1)));
+                            })?;
+                        }
+                        p
+                    }
                     None => {
                         let mut g = Dict::new();
                         g.set(b"FT".to_vec(), Object::name("Btn"));
