@@ -15,7 +15,7 @@ use boa_engine::object::builtins::{JsArray, JsProxy};
 use boa_engine::property::Attribute;
 use boa_engine::{Context, JsObject, JsResult, JsString, JsValue, NativeFunction, Source, js_string};
 
-use crate::{Limits, arg, as_number, data_object, error, function, platform, printd, printf, printx, refuse, s, text};
+use crate::{Limits, arg, as_number, data_object, error, function, platform, printd, printf, printx, refuse, s, scand, text};
 
 /// What kind of template object a node is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -120,6 +120,8 @@ pub enum XfaEffect {
         name: String,
         open: bool,
     },
+    /// `app.execMenuItem("ShowHide…")`: show or hide a side panel.
+    ShowPanel(crate::Panel),
     Print,
     SaveAs,
     LaunchUrl(String),
@@ -225,7 +227,7 @@ fn payload(e: &XfaEffect) -> usize {
         XfaEffect::OpenAttachment { name, .. } => name.len(),
         XfaEffect::MessageBox(s) | XfaEffect::LaunchUrl(s) | XfaEffect::SetFocus(s) => s.len(),
         XfaEffect::ResetData(names) => names.iter().fold(0usize, |n, s| n.saturating_add(s.len()).saturating_add(std::mem::size_of::<String>())),
-        XfaEffect::Print | XfaEffect::SaveAs | XfaEffect::Beep | XfaEffect::Recalculate | XfaEffect::Relayout => 0,
+        XfaEffect::Print | XfaEffect::SaveAs | XfaEffect::Beep | XfaEffect::Recalculate | XfaEffect::Relayout | XfaEffect::ShowPanel(_) => 0,
     }
 }
 
@@ -1137,7 +1139,7 @@ fn resolver(ctx: &mut Context, from: usize, many: bool) -> JsResult<JsValue> {
 
 // ── xfa.host, xfa.layout, xfa.event, app, console ───────────────────────────────────────────
 
-/// Record the effect `e` for the viewer.
+/// Records effect `e` on the host, as [`XHost::push`] does.
 fn effect(ctx: &mut Context, e: XfaEffect) -> JsResult<()> {
     host(ctx)?.borrow_mut().push(e);
     Ok(())
@@ -1150,43 +1152,44 @@ fn export_data_object(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsRes
     Ok(JsValue::undefined())
 }
 
-/// `xfa.host.messageBox(…)`: records the message, cut to [`MAX_LINE`] characters, as a message
-/// box and returns 1, the OK button.
+/// `xfa.host.messageBox(message)`: records the message, cut to [`MAX_LINE`] characters, and
+/// returns 1.
 fn message_box(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
     let m = clip(text(&arg(args, 0), ctx)?);
     effect(ctx, XfaEffect::MessageBox(m))?;
     Ok(JsValue::from(1.0))
 }
 
-/// `xfa.host.resetData(…)`: records a reset of the fields named in the comma-separated argument
-/// (every field when it names none).
+/// `xfa.host.resetData(names)`: asks to reset the comma-separated fields, or every field when
+/// the list is empty.
 fn reset_data(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
     let list = text(&arg(args, 0), ctx)?;
     effect(ctx, XfaEffect::ResetData(reset_names(&list)))?;
     Ok(JsValue::undefined())
 }
 
-/// `xfa.host.print(…)`: records a request to print.
+/// `xfa.host.print(…)`: asks to print; its arguments are ignored.
 fn print(_: &JsValue, _: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
     effect(ctx, XfaEffect::Print)?;
     Ok(JsValue::undefined())
 }
 
-/// `xfa.host.beep()` and `app.beep()`: record a request to beep.
+/// `xfa.host.beep()` and `app.beep()`: ask to beep.
 fn beep(_: &JsValue, _: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
     effect(ctx, XfaEffect::Beep)?;
     Ok(JsValue::undefined())
 }
 
-/// `xfa.host.gotoURL(url)` and `app.launchURL(url)`: record a request to open the link.
+/// `xfa.host.gotoURL(url)` and `app.launchURL(url)`: ask to open the URL.
 fn goto_url(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
     let u = text(&arg(args, 0), ctx)?;
     effect(ctx, XfaEffect::LaunchUrl(u))?;
     Ok(JsValue::undefined())
 }
 
-/// `xfa.host.setFocus(…)`: records moving the focus to a node, given as a node or as a SOM
-/// expression resolved from the current node (kept as written when nothing matches).
+/// `xfa.host.setFocus(target)`: asks to focus the node, given as a node object or as a SOM
+/// expression resolved from the current node; an expression that names no node is passed on
+/// as written.
 fn set_focus(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
     let target = arg(args, 0);
     let som = match target.as_object() {
@@ -1205,13 +1208,14 @@ fn set_focus(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsVal
     Ok(JsValue::undefined())
 }
 
-/// `app.execMenuItem(…)`: `SaveAs` and `Save` record a save-as request and `Print` a print
-/// request; other items do nothing.
+/// `app.execMenuItem(name)`: the effect for the request the shared menu table gives the name
+/// (Save opens Save As too); an unknown name does nothing.
 fn exec_menu_item(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
     let item = text(&arg(args, 0), ctx)?;
-    match item.as_str() {
-        "SaveAs" | "Save" => effect(ctx, XfaEffect::SaveAs)?,
-        "Print" => effect(ctx, XfaEffect::Print)?,
+    match crate::menu_item(&item) {
+        Some(crate::Request::SaveAs) => effect(ctx, XfaEffect::SaveAs)?,
+        Some(crate::Request::Print) => effect(ctx, XfaEffect::Print)?,
+        Some(crate::Request::ShowPanel(p)) => effect(ctx, XfaEffect::ShowPanel(p))?,
         _ => {}
     }
     Ok(JsValue::undefined())
@@ -1270,9 +1274,10 @@ fn xfa_resolve(ctx: &mut Context, many: bool) -> JsResult<JsValue> {
     resolver(ctx, current, many)
 }
 
-/// Set up the object model for one script run from node `current`: `xfa` (with `xfa.event`, whose
-/// target is that node), a separate global `event` whose target is a document offering
-/// `exportDataObject`, `app`, `console`, `util`, and the nodes in scope under their own names.
+/// Defines the globals for one script on node `current`: `xfa` (`form`, `host`, `layout`, `event`,
+/// `resolveNode` and more; `xfa.event`'s target is that node), a separate global `event` whose
+/// target is a document offering `exportDataObject`, `app`, `console`, `util`, and the nodes in
+/// scope by name, with `_name` for each repeatable one's instance manager.
 fn install(ctx: &mut Context, event: &XfaEvent, doc: &XfaDoc, current: usize) -> JsResult<()> {
     let rw = Attribute::CONFIGURABLE;
     let form = node_object(ctx, 0)?;
@@ -1392,6 +1397,7 @@ fn install(ctx: &mut Context, event: &XfaEvent, doc: &XfaDoc, current: usize) ->
         .function(NativeFunction::from_fn_ptr(printf), js_string!("printf"), 1)
         .function(NativeFunction::from_fn_ptr(printd), js_string!("printd"), 2)
         .function(NativeFunction::from_fn_ptr(printx), js_string!("printx"), 2)
+        .function(NativeFunction::from_fn_ptr(scand), js_string!("scand"), 2)
         .build();
     ctx.register_global_property(js_string!("util"), util, rw)?;
     // Unqualified names: the current node's children, its siblings, then each ancestor's
@@ -1465,7 +1471,7 @@ fn install(ctx: &mut Context, event: &XfaEvent, doc: &XfaDoc, current: usize) ->
         "DataView",
         "Intl",
     ];
-    let mut defined: Vec<String> = RESERVED.iter().map(|s| s.to_string()).collect();
+    let mut defined: Vec<String> = RESERVED.iter().map(ToString::to_string).collect();
     for scope in scopes {
         let kids: Vec<(usize, String, bool)> = {
             let h = host(ctx)?.borrow();
