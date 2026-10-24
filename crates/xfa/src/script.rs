@@ -446,6 +446,7 @@ pub fn has_scripts(tpl: &Template) -> bool {
     fn field(f: &Field) -> bool {
         any(&f.scripts) || [&f.calculate, &f.validate].into_iter().flatten().any(|s| !s.text.trim().is_empty())
     }
+    /// Has any object among `nodes` (and their containers, `depth` levels down) a script?
     fn walk(nodes: &[Node], depth: usize) -> bool {
         depth <= MAX_DEPTH
             && nodes.iter().any(|n| match n {

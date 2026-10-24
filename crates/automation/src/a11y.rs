@@ -684,6 +684,8 @@ impl Automation {
         self.js_document_scripts(a)
     }
 
+    /// `form_set_script`: set field `field`'s JavaScript for `event` to `script`, or remove it when
+    /// `script` is left out, as one undoable edit; returns the console output and errors.
     pub(crate) fn form_set_script(&mut self, a: &Args) -> Result<Value> {
         let edit = pdfcraft_engine::Edit::SetFieldScript {
             name: a.str("field")?.into(),

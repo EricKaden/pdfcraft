@@ -2409,6 +2409,8 @@ struct EditCtx {
 }
 
 impl EditCtx {
+    /// The context for one edit made at `now` (Unix seconds, when known), its random values
+    /// seeded from the time and `salt`.
     fn new(now: Option<i64>, salt: u64) -> Self {
         let mut seed = 0x9E37_79B9_7F4A_7C15u64 ^ salt;
         if let Some(t) = now {
@@ -3922,6 +3924,8 @@ impl Session {
                     .map_err(EditError::Write)?;
                 cx.xfa_out.errors.extend(notes);
             }
+            /// The fields edit `e` (and the edits it batches) gives new values, and whether it
+            /// resets the form.
             fn collect(e: &Edit, changed: &mut Vec<String>, reset: &mut bool) {
                 match e {
                     Edit::SetFieldValue { name, .. } => changed.push(name.clone()),
