@@ -4743,26 +4743,31 @@ fn an_exit_skip_does_not_outlive_its_change() {
     assert_eq!(field_text(&s, id, "exits"), (before.parse::<u32>().unwrap() + 1).to_string(), "after another edit, the exit runs");
 }
 
-/// A focus event that changes nothing, batched with a form edit, doesn't cost the batch its edit.
+/// A form-script event can't be batched with other edits: its scripts and those the batch's value
+/// edits run would interleave (the field's exit running twice). The batch is refused whole, and
+/// the document is left as it was.
 #[test]
-fn a_batch_keeps_its_edits_when_its_focus_event_changes_nothing() {
+fn a_form_script_event_in_a_batch_is_refused() {
     let mut s = Session::new();
     let id = s.open("form.pdf", None, focus_form(), None).expect("opens");
-    let som = {
+    let som_of = |s: &Session, name: &str| {
         let doc = s.get(id).unwrap();
-        let quiet = doc.form.iter().find(|f| f.name == "quiet").unwrap();
-        crate::xfa::widget_som(&doc.editor.as_ref().unwrap().cos, quiet, 0).unwrap()
+        let f = doc.form.iter().find(|f| f.name == name).unwrap();
+        crate::xfa::widget_som(&doc.editor.as_ref().unwrap().cos, f, 0).unwrap()
     };
-    let batch = Edit::Batch {
+    let batch = |name: &str, som: String| Edit::Batch {
         label: "Fill and leave".into(),
-        edits: vec![
-            Edit::SetFieldValue { name: "quiet".into(), value: FieldValue::Text("z".into()) },
-            Edit::XfaEvent { som, activity: "exit".into() },
-        ],
+        edits: vec![Edit::SetFieldValue { name: name.into(), value: FieldValue::Text("z".into()) }, Edit::XfaEvent { som, activity: "exit".into() }],
     };
-    s.apply(id, batch).unwrap();
-    assert_eq!(field_text(&s, id, "quiet"), "z", "the value is kept");
-    assert!(s.get(id).unwrap().dirty);
+    // An exit that counts: it would run once for the event and once for the change.
+    let probe = som_of(&s, "probe");
+    assert!(matches!(s.apply(id, batch("probe", probe)), Err(EditError::Invalid(_))));
+    assert_eq!((field_text(&s, id, "probe"), field_text(&s, id, "exits")), (String::new(), "0".into()));
+    // An exit that changes nothing: the batch's value isn't kept either, nor dropped silently.
+    let quiet = som_of(&s, "quiet");
+    assert!(s.apply(id, batch("quiet", quiet)).is_err());
+    assert_eq!(field_text(&s, id, "quiet"), "");
+    assert!(!s.get(id).unwrap().dirty, "nothing was applied");
 }
 
 /// A field's exit is noted as run (for the focus loss to skip) only when an exit script ran:

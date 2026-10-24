@@ -2893,6 +2893,11 @@ fn run_edit(doc: &mut pdfcraft_cos::Document, edit: &Edit, cx: &mut EditCtx) -> 
             doc.remove_encryption();
         }
         Edit::Batch { edits, .. } => {
+            // A form-script event runs on its own: in a batch, its scripts and those the batch's
+            // value edits run afterwards (change, exit) would interleave, an exit running twice.
+            if edits.iter().any(|e| matches!(e, Edit::XfaEvent { .. })) {
+                return Err(EditError::Invalid("a form script event can't be part of a batch of edits".into()));
+            }
             for e in edits {
                 run_edit(doc, e, cx)?;
             }
