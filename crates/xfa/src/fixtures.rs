@@ -686,14 +686,28 @@ pub fn saved_with_pages_shell(render: &str, signed: bool) -> Vec<u8> {
 /// fields of its own (none of them a signature, none with a value).
 pub fn deep_saved_with_pages_shell(depth: usize) -> Vec<u8> {
     let mut objs = saved_with_pages_objects("required", false);
-    // Object 6, the box, becomes the outermost of the nested fields; the box goes last.
+    // Object 6, the box, becomes the outermost of the nested fields, each the parent of the next;
+    // the box goes last, under the innermost, and the page lists it under its new number.
     let first = objs.len() + 1;
-    let field = |name: usize, kid: usize| format!("<< /T (n{name}) /Kids [{kid} 0 R] >>").into_bytes();
-    let Some(sig) = objs.get_mut(5).map(|o| std::mem::replace(o, field(0, first))) else { return assemble(objs) };
+    let depth = depth.max(1);
+    let widget = first + depth - 1;
+    let parent_of = |n: usize| if n == first { 6 } else { n - 1 };
+    let field = |name: usize, kid: usize, parent: Option<usize>| {
+        let parent = parent.map(|p| format!(" /Parent {p} 0 R")).unwrap_or_default();
+        format!("<< /T (n{name}) /Kids [{kid} 0 R]{parent} >>").into_bytes()
+    };
+    let kid_of_six = if depth == 1 { widget } else { first };
+    let Some(sig) = objs.get_mut(5).map(|o| std::mem::replace(o, field(0, kid_of_six, None))) else { return assemble(objs) };
     for d in 1..depth {
-        objs.push(field(d, first + d));
+        let n = first + d - 1;
+        objs.push(field(d, n + 1, Some(parent_of(n))));
     }
-    objs.push(sig);
+    let innermost = if depth == 1 { 6 } else { widget - 1 };
+    let sig = String::from_utf8_lossy(&sig).replacen("/T (form[0].sign[0])", &format!("/T (sign[0]) /Parent {innermost} 0 R"), 1);
+    objs.push(sig.into_bytes());
+    if let Some(page) = objs.get_mut(2) {
+        *page = String::from_utf8_lossy(page).replacen("/Annots [6 0 R]", &format!("/Annots [{widget} 0 R]"), 1).into_bytes();
+    }
     assemble(objs)
 }
 

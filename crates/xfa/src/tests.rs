@@ -319,6 +319,13 @@ fn a_form_saved_with_its_pages_is_laid_out_when_it_requires_dynamic_rendering() 
     let deep = |depth: usize| Document::open(Arc::new(crate::fixtures::deep_saved_with_pages_shell(depth))).unwrap();
     assert!(is_dynamic(&deep(5)), "nested, unsigned");
     assert!(!is_dynamic(&deep(40)), "too deep to tell: as if signed");
+    // The page lists the box under its new number, and the box knows its parent.
+    let doc = deep(5);
+    let page = doc.get(pdfcraft_cos::ObjRef::new(3, 0));
+    let annot = page.as_dict().and_then(|d| d.get(b"Annots")).and_then(|a| a.as_array().and_then(|a| a.first().cloned())).and_then(|a| a.as_ref());
+    let widget = annot.map(|r| doc.get(r));
+    assert_eq!(widget.as_ref().and_then(|w| w.as_dict().and_then(|d| d.name(b"FT")).map(<[u8]>::to_vec)), Some(b"Sig".to_vec()));
+    assert!(widget.as_ref().and_then(|w| w.as_dict().map(|d| d.contains(b"Parent"))).unwrap_or(false));
 }
 
 /// Only the configuration packet's `acrobat/acrobat7/dynamicRender` asks for dynamic rendering:
