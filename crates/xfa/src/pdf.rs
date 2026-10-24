@@ -994,6 +994,9 @@ fn earlier_images(doc: &Document, pages: ObjRef) -> HashMap<[u8; 32], ObjRef> {
     out
 }
 
+/// Write laid-out `form` into `doc`: its pages replace the document's, its widgets join the
+/// AcroForm's fields (a box the file holds a signature for keeps it), and the AcroForm is marked
+/// laid out. What was written, with any warnings, comes back.
 pub fn write_form(doc: &mut Document, form: &Form) -> Result<Written, XfaError> {
     let catalog_ref = doc.root().ok_or_else(|| XfaError::Malformed("the document has no catalog".into()))?;
     let mut catalog = doc.get(catalog_ref).as_dict().cloned().ok_or_else(|| XfaError::Malformed("the catalog is not a dictionary".into()))?;
