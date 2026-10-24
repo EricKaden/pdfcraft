@@ -1605,6 +1605,7 @@ mod data_objects {
             ("exit", "Blur|Field"),
             ("enter", "Focus|Field"),
             ("mouseDown", "Mouse Down|Field"),
+            ("mouseUp", "Mouse Up|Field"),
             ("mouseEnter", "Mouse Enter|Field"),
             ("mouseExit", "Mouse Exit|Field"),
             ("calculate", "Calculate|Field"),

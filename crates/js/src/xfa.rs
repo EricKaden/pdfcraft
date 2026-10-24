@@ -1275,11 +1275,11 @@ fn xfa_resolve(ctx: &mut Context, many: bool) -> JsResult<JsValue> {
 }
 
 /// The bare `event`'s `name` and `type` for an XFA `activity`. The activities that are field
-/// events in the public "JavaScript for Acrobat API Reference" take that field event's name and
+/// events in the public JavaScript API reference for PDF forms take that field event's name and
 /// the type `Field`: a click is `Mouse Up`, a change `Keystroke` and an exit `Blur` (all three
-/// measured on a synthetic form in another viewer), and enter, mouseDown, mouseEnter, mouseExit,
-/// calculate and validate the reference's `Focus`, `Mouse Down`, `Mouse Enter`, `Mouse Exit`,
-/// `Calculate` and `Validate`. Any other activity (initialize, ready, docReady, preSign, …) has
+/// measured on a synthetic form in another viewer), and enter, mouseDown, mouseUp, mouseEnter,
+/// mouseExit, calculate and validate the reference's `Focus`, `Mouse Down`, `Mouse Up`,
+/// `Mouse Enter`, `Mouse Exit`, `Calculate` and `Validate`. Any other activity (initialize, ready, docReady, preSign, …) has
 /// no field event there: it keeps its XFA name and has no type.
 fn field_event(activity: &str) -> (&str, Option<&'static str>) {
     let name = match activity {
@@ -1288,6 +1288,7 @@ fn field_event(activity: &str) -> (&str, Option<&'static str>) {
         "exit" => "Blur",
         "enter" => "Focus",
         "mouseDown" => "Mouse Down",
+        "mouseUp" => "Mouse Up",
         "mouseEnter" => "Mouse Enter",
         "mouseExit" => "Mouse Exit",
         "calculate" => "Calculate",
