@@ -1725,7 +1725,7 @@ mod revert_draft_tests {
         let id = app.views[i].id;
         let mut draft = focus("a1b2");
         draft.name = "digits".into();
-        draft.keystroke = Some(crate::forms_ui::keystroke_from("", "a1b2", Some((0, 0))));
+        draft.keystroke = Some(crate::forms_ui::keystroke_from("", "a1b2", Some((0, 0)), false));
         app.views[i].forms.focus = Some(draft);
         let form = app.session.get(id).unwrap().form.clone();
         crate::forms_ui::commit(&mut app.views[i], &form);

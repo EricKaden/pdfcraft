@@ -140,11 +140,11 @@ fn open_focus(f: &FormField, widget: usize) -> Focus {
 
 /// The keystroke that turned `before` into `after`, with `sel` the editor's selection (or caret)
 /// just before it, as character positions either way round. Typing or pasting replaces the
-/// selection; with only a caret, a deletion is taken from before it (Backspace) or after it
-/// (Delete). Read this way, typing into a run of the same letter is placed where the caret was,
-/// which the text alone can't tell. When the selection doesn't explain the change, the text does
-/// ([`keystroke_between`]).
-pub(crate) fn keystroke_from(before: &str, after: &str, sel: Option<(usize, usize)>) -> pdfcraft_engine::xfa::Keystroke {
+/// selection; with only a caret, a deletion is taken from before it (Backspace) or, when
+/// `forward` (Delete was pressed), after it. Read this way, typing or deleting in a run of the
+/// same letter is placed where the caret was, which the text alone can't tell. When the selection
+/// doesn't explain the change, the text does ([`keystroke_between`]).
+pub(crate) fn keystroke_from(before: &str, after: &str, sel: Option<(usize, usize)>, forward: bool) -> pdfcraft_engine::xfa::Keystroke {
     let (b, a): (Vec<char>, Vec<char>) = (before.chars().collect(), after.chars().collect());
     // `b[start..end]` replaced gives `a`: the keystroke, when it does.
     let fits = |start: usize, end: usize| -> Option<pdfcraft_engine::xfa::Keystroke> {
@@ -168,10 +168,9 @@ pub(crate) fn keystroke_from(before: &str, after: &str, sel: Option<(usize, usiz
         if start == end
             && let Some(gone) = b.len().checked_sub(a.len()).filter(|n| *n > 0)
         {
-            if let Some(k) = start.checked_sub(gone).and_then(|from| fits(from, start)) {
-                return k;
-            }
-            if let Some(k) = fits(start, start.saturating_add(gone)) {
+            let backward = || start.checked_sub(gone).and_then(|from| fits(from, start));
+            let ahead = || fits(start, start.saturating_add(gone));
+            if let Some(k) = if forward { ahead().or_else(backward) } else { backward().or_else(ahead) } {
                 return k;
             }
         }
@@ -798,8 +797,12 @@ pub(crate) fn overlay(
                         }
                     }
                     // A keystroke, for the field's XFA change scripts to see (and maybe rewrite).
-                    if fx.text != typed_from && !fx.no_keystroke_scripts {
-                        fx.keystroke = Some(keystroke_from(&typed_from, &fx.text, typed_at));
+                    // Typed or pasted this frame, even when it left the text as it was (an `a` typed
+                    // over a selected `a`): a script may still rewrite it.
+                    let typed = r.has_focus() && ui.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Text(_) | egui::Event::Paste(_))));
+                    if (fx.text != typed_from || typed) && !fx.no_keystroke_scripts {
+                        let forward = ui.input(|i| i.key_pressed(egui::Key::Delete));
+                        fx.keystroke = Some(keystroke_from(&typed_from, &fx.text, typed_at, forward));
                     }
                     if let Some(caret) = fx.caret.take()
                         && let Some(mut st) = egui::TextEdit::load_state(ui.ctx(), r.id)
@@ -1073,9 +1076,17 @@ mod tests {
         // With the editor's caret or selection, a keystroke in a run of one letter is placed where
         // it happened, which the text alone can't tell.
         let at = |b: &str, a: &str, sel: (usize, usize)| {
-            let k = keystroke_from(b, a, Some(sel));
+            let k = keystroke_from(b, a, Some(sel), false);
             (k.change, k.sel_start, k.sel_end)
         };
+        // Delete pressed: in a run of one letter the deletion is the one after the caret.
+        let k = keystroke_from("aaa", "aa", Some((1, 1)), true);
+        assert_eq!((k.change.as_str(), k.sel_start, k.sel_end), ("", 1, 2), "Delete in a run");
+        let k = keystroke_from("aaa", "aa", Some((1, 1)), false);
+        assert_eq!((k.sel_start, k.sel_end), (0, 1), "Backspace in a run");
+        // Typed over the same letter: the text is unchanged, the keystroke still replaces it.
+        let k = keystroke_from("a", "a", Some((0, 1)), false);
+        assert_eq!((k.change.as_str(), k.sel_start, k.sel_end), ("a", 0, 1));
         assert_eq!(at("aaa", "aaaa", (1, 1)), ("a".into(), 1, 1), "typed after the first a");
         assert_eq!(at("aaa", "aa", (2, 2)), ("".into(), 1, 2), "Backspace takes the one before the caret");
         assert_eq!(at("abc", "ac", (2, 2)), ("".into(), 1, 2), "Backspace");

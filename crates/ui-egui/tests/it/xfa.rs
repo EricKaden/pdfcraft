@@ -216,6 +216,26 @@ fn a_change_script_rewrites_what_is_typed_in_the_app() {
     assert_eq!(editor(&h), "a1");
 }
 
+/// A letter typed over the same letter, selected, leaves the text as it was, but it is still a
+/// keystroke for the field's change script: one that puts what is typed in capitals enters `A`.
+#[test]
+fn a_keystroke_that_leaves_the_text_unchanged_still_runs_the_change_script() {
+    let mut h = open(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::keystroke_template()));
+    crate::support::settle(&mut h);
+    let editor = |h: &Harness<'static, PdfCraftApp>| h.state().views[0].forms.focus.as_ref().map(|f| f.text.clone()).unwrap_or_default();
+    click_field(&mut h, "upper");
+    {
+        let fx = h.state_mut().views[0].forms.focus.as_mut().unwrap();
+        fx.text = "a".into();
+        fx.select_all = true;
+        fx.request_focus = true;
+    }
+    h.run_steps(3);
+    h.event(egui::Event::Text("a".into()));
+    h.run_steps(3);
+    assert_eq!(editor(&h), "A");
+}
+
 /// An enter script that changes the field it enters (clearing a "Type here") shows in the editor,
 /// so leaving the field keeps the script's value rather than writing the old one back; typing
 /// after it is kept as usual. When the exit of the field left changed it first (`relay` puts the
