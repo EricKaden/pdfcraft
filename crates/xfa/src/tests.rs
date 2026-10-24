@@ -411,6 +411,46 @@ fn relevant_and_presence_say_where_fields_and_draws_show() {
     assert!(warned[0].contains("-screen"), "{warned:?}");
 }
 
+/// A page count shown only on screen or only in print is filled in like any other, and a view
+/// other than print named on a flowed subform or a table row is warned about as on a draw.
+#[test]
+fn restricted_page_counts_are_filled_in_and_other_views_warned_about_everywhere() {
+    let xfa_ns = r#"xmlns:xfa="http://www.xfa.org/schema/xfa-data/1.0/""#;
+    let body = format!(
+        r##"<subform name="body" layout="tb" w="7.5in">
+  <subform name="screenOnly" layout="position" w="7.5in" h="1in" relevant="-print">
+   <draw name="pn" x="0in" y="0in" w="2in" h="0.3in"><value><exData contentType="text/html"><body xmlns="http://www.w3.org/1999/xhtml"><p>Pages: <span xfa:embed="#pageCount" {xfa_ns}/></p></body></exData></value><font typeface="Arial" size="10pt"/></draw>
+  </subform>
+  <field name="pageCount" id="pageCount" presence="hidden" w="1in" h="0.2in"><ui><textEdit/></ui><event activity="ready" ref="$layout"><script contentType="application/x-javascript">this.rawValue = xfa.layout.pageCount();</script></event></field>
+  <subform name="flowed" layout="tb" w="7.5in" relevant="-screen"><draw name="f" w="2in" h="0.3in"><value><text>Flowed</text></value></draw></subform>
+  <subform name="grid" layout="table" columnWidths="2in" w="2in"><subform name="row" layout="row" relevant="-preview"><draw name="c" h="0.3in"><value><text>Cell</text></value></draw></subform></subform>
+ </subform>"##
+    );
+    let form = layout_xml(&one_area_form(r#"layout="tb""#, &body)).unwrap();
+    let texts: Vec<String> = form.pages[0]
+        .items
+        .iter()
+        .filter_map(|i| match i {
+            Item::Only { item, .. } => match item.as_ref() {
+                Item::Text(s) => Some(s.text.clone()),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect();
+    assert!(texts.iter().any(|t| t.contains("Pages:") && t.contains('1')), "{texts:?}");
+    assert!(
+        form.pages
+            .iter()
+            .flat_map(|p| &p.items)
+            .all(|i| !matches!(i, Item::Only { item, .. } if matches!(item.as_ref(), Item::Text(s) if s.text.contains('\u{E000}')))),
+        "no page-count mark left"
+    );
+    for token in ["-screen", "-preview"] {
+        assert!(form.warnings.iter().any(|w| w.contains(token)), "{token}: {:?}", form.warnings);
+    }
+}
+
 /// A master page's own objects show where they say, even when the page was started by a
 /// screen-only subform that ran onto it: its footer isn't made screen-only too.
 #[test]

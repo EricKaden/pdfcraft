@@ -292,14 +292,20 @@ pub fn layout(tpl: &Template, data: Option<&DataNode>) -> Result<Form, XfaError>
     let count = total.to_string();
     for p in &mut l.pages {
         for it in &mut p.items {
-            if let Item::Text(s) = it
-                && s.text.contains(PAGE_COUNT_MARK)
-            {
-                s.text = s.text.replace(PAGE_COUNT_MARK, &count);
-            }
+            fill_page_count(it, &count);
         }
     }
     Ok(Form { pages: l.pages, fields: l.fields, warnings: l.warnings })
+}
+
+/// Put the page count `count` where text `it` holds [`PAGE_COUNT_MARK`], text drawn only on
+/// screen or only in print ([`Item::Only`]) included.
+fn fill_page_count(it: &mut Item, count: &str) {
+    match it {
+        Item::Text(s) if s.text.contains(PAGE_COUNT_MARK) => s.text = s.text.replace(PAGE_COUNT_MARK, count),
+        Item::Only { item, .. } => fill_page_count(item, count),
+        _ => {}
+    }
 }
 
 // Bytes of embedded field values copied out on this thread, for tests that bound layout work.
@@ -513,6 +519,14 @@ impl Layouter<'_> {
         let m = msg.into();
         if self.warned.insert(m.clone()) && self.warnings.len() < 100 {
             self.warnings.push(m);
+        }
+    }
+
+    /// Say once when `c`'s `relevant` names a view other than print, which is drawn as if it
+    /// didn't: for drawn objects, flowed subforms and table rows alike.
+    fn warn_other_views(&mut self, c: &Common) {
+        if let Some(other) = &c.relevant_other {
+            self.warn_once(format!("the form limits some objects to views other than print (relevant \"{other}\"); they are drawn as if it didn't"));
         }
     }
 
@@ -820,6 +834,7 @@ impl Layouter<'_> {
     /// Flow subform `node` (each instance the data asks for) into the content areas, shown where
     /// it and what it is inside say ([`Common::views`]); hidden from both, it still takes its room.
     fn flow_subform(&mut self, node: &Node, avail: Option<(f64, f64)>, ctx: &Ctx, depth: usize, sib: usize) -> Result<(), XfaError> {
+        self.warn_other_views(node.common());
         let views = self.views.and(node.common().views());
         let outer = std::mem::replace(&mut self.views, views);
         let flowed = self.flow_subform_in(node, avail, ctx, depth, sib);
@@ -1333,6 +1348,7 @@ impl Layouter<'_> {
         if depth > MAX_DEPTH {
             return Ok(());
         }
+        self.warn_other_views(&row.common);
         let views = self.views.and(row.common.views());
         if !views.any() {
             return Ok(());
@@ -1379,9 +1395,7 @@ impl Layouter<'_> {
             return Ok(());
         }
         let c = node.common();
-        if let Some(other) = &c.relevant_other {
-            self.warn_once(format!("the form limits some objects to views other than print (relevant \"{other}\"); they are drawn as if it didn't"));
-        }
+        self.warn_other_views(c);
         let views = self.views.and(c.views());
         if !views.any() {
             return Ok(());
