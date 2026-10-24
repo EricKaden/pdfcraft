@@ -683,19 +683,66 @@ fn parse_node(c: XmlNode, warnings: &mut Vec<String>, depth: usize) -> Option<No
 }
 
 /// Whether a `layout:ready` script uses page numbers (`xfa.layout.page(this)`, `pageCount()`): on a
-/// field, it makes the field one the layout numbers itself. It looks for the names in the
-/// script's text and doesn't parse it, so a script that only mentions one (in a comment or a
-/// string) counts too, and its writes to its field are dropped like a page number's.
-pub fn numbers_pages(script: &str) -> bool {
-    script.contains("pageCount") || script.contains("layout.page(") || script.contains("layout.absPage(")
+/// field, it makes the field one the layout numbers itself. Its code is read (JavaScript, or
+/// FormCalc when `formcalc`), not its comments and strings, so a script that only mentions one of
+/// the names writes to its field as any other does.
+pub fn numbers_pages(script: &str, formcalc: bool) -> bool {
+    let code = code_of(script, formcalc);
+    code.contains("pageCount") || code.contains("layout.page(") || code.contains("layout.absPage(")
+}
+
+/// `script` with its comments and string literals blanked out: `//` and `/* */` comments and
+/// `'…'`, `"…"` and `` `…` `` strings (with `\` escapes) in JavaScript; `;` and `//` comments and
+/// `"…"` strings (a doubled `""` inside) in FormCalc. Line breaks stay. An unclosed comment or
+/// string runs to the end.
+fn code_of(script: &str, formcalc: bool) -> String {
+    let mut out = String::with_capacity(script.len());
+    let mut chars = script.chars().peekable();
+    while let Some(c) = chars.next() {
+        let line_comment = (c == '/' && chars.peek() == Some(&'/')) || (formcalc && c == ';');
+        if line_comment {
+            for n in chars.by_ref() {
+                if n == '\n' {
+                    out.push('\n');
+                    break;
+                }
+            }
+        } else if !formcalc && c == '/' && chars.peek() == Some(&'*') {
+            chars.next();
+            let mut star = false;
+            for n in chars.by_ref() {
+                if star && n == '/' {
+                    break;
+                }
+                star = n == '*';
+            }
+            out.push(' ');
+        } else if c == '"' || (!formcalc && (c == '\'' || c == '`')) {
+            while let Some(n) = chars.next() {
+                if !formcalc && n == '\\' {
+                    chars.next();
+                } else if n == c {
+                    if formcalc && chars.peek() == Some(&c) {
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                }
+            }
+            out.push(' ');
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }
 
 /// Which page-number role a field with a layout:ready script plays, if any.
 fn page_role(f: &Field) -> Option<PageRole> {
     let script = f.scripts.iter().find(|s| s.activity == "ready" || s.activity == "layoutReady")?;
-    if !numbers_pages(&script.text) {
+    if !numbers_pages(&script.text, script.formcalc) {
         None
-    } else if script.text.contains("pageCount") {
+    } else if code_of(&script.text, script.formcalc).contains("pageCount") {
         Some(PageRole::Count)
     } else {
         Some(PageRole::Number)

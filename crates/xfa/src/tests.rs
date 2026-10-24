@@ -3552,9 +3552,19 @@ fn a_layout_ready_event_is_told_apart_from_form_ready() {
     let live = form_tree(&tpl, None, &Overrides::default());
     assert!(live.events.iter().any(|e| e.som == "form[0]" && e.activity == "layoutReady"), "{:?}", live.events);
     // Page numbering is what the layout does itself.
-    assert!(crate::numbers_pages("this.rawValue = xfa.layout.page(this);"));
-    assert!(crate::numbers_pages("this.rawValue = xfa.layout.pageCount();"));
-    assert!(!crate::numbers_pages("this.rawValue = \"laid out\";"));
+    let js = |s: &str| crate::numbers_pages(s, false);
+    let formcalc = |s: &str| crate::numbers_pages(s, true);
+    assert!(js("this.rawValue = xfa.layout.page(this);"));
+    assert!(js("this.rawValue = xfa.layout.pageCount();"));
+    assert!(!js("this.rawValue = \"laid out\";"));
+    // Only the code counts: a mention in a comment or a string is not a page number.
+    assert!(!js("// xfa.layout.pageCount() was here\nthis.rawValue = \"ready\";"));
+    assert!(!js("/* xfa.layout.page(this) */ this.rawValue = 'see pageCount';"));
+    assert!(!js("this.rawValue = \"it's \\\"pageCount\\\"\";"));
+    assert!(js("var s = 'pageCount'; this.rawValue = xfa.layout.pageCount();"), "a string before the call");
+    assert!(formcalc("$ = xfa.layout.pageCount()"));
+    assert!(!formcalc("; xfa.layout.pageCount()\n$ = \"pageCount \"\" here\""));
+    assert!(formcalc("$ = \"a;b\" ; not a comment's end\n$ = xfa.layout.page($)"), "a ; inside a string isn't a comment");
 }
 
 /// `typed_date` rewrites a date typed by another of a field's edit-picture patterns in the first

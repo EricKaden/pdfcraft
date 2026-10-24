@@ -857,8 +857,11 @@ pub(crate) fn on_open(doc: &mut pdfcraft_cos::Document, tpl: &Template, run: &mu
     let (ready, numbered) = {
         let live = r.live();
         let ready: Vec<ScriptEvent> = live.events.iter().filter(|e| e.activity == "layoutReady").cloned().collect();
-        let numbered: HashSet<String> =
-            ready.iter().filter(|e| pdfcraft_xfa::numbers_pages(&e.script) && is_field(&live.root, &e.som, 0)).map(|e| e.som.clone()).collect();
+        let numbered: HashSet<String> = ready
+            .iter()
+            .filter(|e| pdfcraft_xfa::numbers_pages(&e.script, e.formcalc) && is_field(&live.root, &e.som, 0))
+            .map(|e| e.som.clone())
+            .collect();
         (ready, numbered)
     };
     r.numbered = numbered;
