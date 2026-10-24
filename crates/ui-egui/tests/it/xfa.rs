@@ -130,6 +130,8 @@ fn click_field(h: &mut Harness<'static, PdfCraftApp>, name: &str) {
     h.run_steps(4);
 }
 
+/// Clicking an XFA button in the app runs its click script: one adds a row, another shows its
+/// message as a notice.
 #[test]
 fn xfa_buttons_run_their_scripts_in_the_app() {
     let mut h = open(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::scripted_template()));
@@ -225,6 +227,8 @@ fn an_enter_script_that_changes_its_field_shows_in_the_editor() {
     assert_eq!(value(&h), "");
 }
 
+/// A message an initialize script shows on opening appears at once, and a print request from it
+/// is refused (only a click may print).
 #[test]
 fn messages_from_scripts_run_on_open_show_right_away() {
     let tpl = pdfcraft_xfa::fixtures::scripted_template()

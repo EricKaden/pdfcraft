@@ -4640,6 +4640,8 @@ fn guard_turns_a_panic_into_an_error() {
     assert_eq!(guard(|| -> u8 { panic!("page {n} is bad") }), Err("page 3 is bad".to_string()));
 }
 
+/// Measurement edits are single undoable steps that leave the file unchanged when they fail, and
+/// respect the document's annotation permissions.
 #[test]
 fn measurement_edits_are_transactional_and_honour_annotation_permissions() {
     let mut session = Session::default();
@@ -4823,6 +4825,8 @@ fn a_radio_buttons_own_focus_scripts_run() {
     assert_eq!(field_text(&s, id, "drops"), "1");
 }
 
+/// A dynamic XFA form is laid out from its template on opening (an appended revision, not an
+/// edit), takes values from the datasets, and saves its filled values incrementally.
 #[test]
 fn dynamic_xfa_forms_are_laid_out_on_open_filled_and_saved_incrementally() {
     let original = Arc::new(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::template(3)));

@@ -93,6 +93,7 @@ fn fillable(f: &FormField) -> bool {
     !f.read_only() && !matches!(f.kind, FormFieldKind::PushButton | FormFieldKind::Signature)
 }
 
+/// The editor's draft for widget `widget` of field `f`, opened on the field's value.
 fn open_focus(f: &FormField, widget: usize) -> Focus {
     Focus {
         name: f.name.clone(),

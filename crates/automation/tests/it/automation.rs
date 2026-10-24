@@ -6777,6 +6777,8 @@ fn growable_xfa_text_paginates_after_fill_save_and_print() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// A print button repeated on every page of an XFA form runs its own XFA click script (a print
+/// request) through js_run, from each copy, before and after saving and reopening.
 #[test]
 fn repeated_xfa_print_buttons_work_through_tools_and_after_reopen() {
     let dir = workdir("xfa-print-buttons");
@@ -6846,6 +6848,8 @@ fn xfa_focus_scripts_run_through_form_focus() {
     }
 }
 
+/// XFA scripts run through the tools: initialize and calculate on opening, calculations after
+/// form_fill, and a button's click script through js_run, adding a row that undo takes away.
 #[test]
 fn xfa_scripts_run_for_buttons_and_field_changes_through_tools() {
     let dir = workdir("xfa-scripts");

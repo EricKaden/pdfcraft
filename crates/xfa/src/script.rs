@@ -440,9 +440,11 @@ pub fn form_tree(tpl: &Template, data: Option<&DataNode>, ov: &Overrides) -> Liv
 /// Does the template declare any script (an event, calculation or validation)? Forms without
 /// one need no live form and run nothing.
 pub fn has_scripts(tpl: &Template) -> bool {
+    /// Is any of `s` a non-blank script?
     fn any(s: &[Script]) -> bool {
         s.iter().any(|s| !s.text.trim().is_empty())
     }
+    /// Has field `f` an event, calculate or validate script?
     fn field(f: &Field) -> bool {
         any(&f.scripts) || [&f.calculate, &f.validate].into_iter().flatten().any(|s| !s.text.trim().is_empty())
     }

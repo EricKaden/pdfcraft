@@ -677,6 +677,8 @@ impl Automation {
         Ok(json!({ "scripts": list }))
     }
 
+    /// `js_set_document_script`: set the document-level script `name` to `script`, or remove it
+    /// when `script` is left out, as one undoable edit; returns the document's scripts.
     pub(crate) fn js_set_document_script(&mut self, a: &Args) -> Result<Value> {
         let edit = pdfcraft_engine::Edit::SetDocumentScript { name: a.str("name")?.into(), script: a.opt_str("script")?.map(str::to_string) };
         let id = self.doc(a)?.id;
@@ -724,6 +726,8 @@ impl Automation {
         Ok(json!({ "changed": changed, "alerts": out.alerts, "console": out.console, "requests": reqs, "errors": out.errors }))
     }
 
+    /// `form_merge_data`: merge the form data files at `paths` into one CSV at `path`, a row per
+    /// file; returns the path and the row and column counts.
     pub(crate) fn form_merge_data(&mut self, a: &Args) -> Result<Value> {
         let mut files = Vec::new();
         for p in a.strs("paths")? {
