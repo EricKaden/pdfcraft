@@ -285,15 +285,29 @@ impl Session {
     /// there are none: not a laid-out XFA form, JavaScript off, no such field, or no such script.
     /// What the scripts said or asked for is in [`Session::take_js_output`].
     pub fn run_sign_event(&mut self, id: DocId, field: &str, event: SignEvent) -> Result<bool, EditError> {
-        if self.js_off {
-            return Ok(false);
+        if self.get(id).is_none() {
+            return Err(EditError::NoDocument);
         }
-        let doc = self.get(id).ok_or(EditError::NoDocument)?;
-        let (Some(tpl), Some(editor)) = (doc.xfa_template.clone(), doc.editor.as_ref()) else { return Ok(false) };
-        let Some(f) = doc.form.iter().find(|f| f.name == field) else { return Ok(false) };
-        let Some(som) = crate::xfa::scripted_som(&editor.cos, &tpl, f, event.activity()) else { return Ok(false) };
+        let Some(som) = self.sign_event_som(id, field, event) else { return Ok(false) };
         self.apply(id, Edit::XfaEvent { som, activity: event.activity().into() })?;
         Ok(true)
+    }
+
+    /// Whether signature field `field` of document `id` has XFA signing scripts for `event` that
+    /// [`Session::run_sign_event`] would run, without running them.
+    pub fn sign_event_scripted(&self, id: DocId, field: &str, event: SignEvent) -> bool {
+        self.sign_event_som(id, field, event).is_some()
+    }
+
+    /// The SOM path of signature field `field` when it has scripts for `event` to run.
+    fn sign_event_som(&self, id: DocId, field: &str, event: SignEvent) -> Option<String> {
+        if self.js_off {
+            return None;
+        }
+        let doc = self.get(id)?;
+        let (tpl, editor) = (doc.xfa_template.as_ref()?, doc.editor.as_ref()?);
+        let f = doc.form.iter().find(|f| f.name == field)?;
+        crate::xfa::scripted_som(&editor.cos, tpl, f, event.activity())
     }
 
     /// Run `script` in document `id`, for a button (`target`: the field, event "Mouse Up") or

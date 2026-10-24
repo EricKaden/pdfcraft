@@ -248,11 +248,33 @@ impl Automation {
             Some(v) => labels_arg(v)?,
         };
         let out = self.resolve(a.str("out")?, true)?;
-        // A dynamic form's preSign scripts run first, so what they change is signed with it.
+        // A dynamic form's signing scripts run only when asked: what preSign changes is signed,
+        // and the caller hasn't seen it. What they changed is listed.
+        let run_scripts = a.opt_bool("run_form_scripts")?.unwrap_or(false);
         let signing = field.clone();
+        let scripted = signing.as_deref().is_some_and(|f| {
+            self.session.sign_event_scripted(doc_id, f, SignEvent::Before) || self.session.sign_event_scripted(doc_id, f, SignEvent::After)
+        });
+        // Each field's value and whether it is read-only, to tell what the preSign scripts changed.
+        let values = |me: &Automation| -> std::collections::BTreeMap<String, (Vec<String>, bool)> {
+            me.session.get(doc_id).map(|d| d.form.iter().map(|f| (f.name.clone(), (f.value.clone(), f.read_only()))).collect()).unwrap_or_default()
+        };
+        let was = values(self);
         let before = match &signing {
-            Some(f) => self.session.run_sign_event(doc_id, f, SignEvent::Before).map_err(failed)?,
-            None => false,
+            Some(f) if run_scripts => self.session.run_sign_event(doc_id, f, SignEvent::Before).map_err(failed)?,
+            _ => false,
+        };
+        let changed: Vec<Value> = if before {
+            values(self)
+                .into_iter()
+                .filter(|(name, now)| was.get(name) != Some(now))
+                .map(|(name, (value, read_only))| {
+                    let (old, old_ro) = was.get(&name).cloned().unwrap_or_default();
+                    json!({ "field": name, "before": old, "after": value, "read_only_before": old_ro, "read_only": read_only })
+                })
+                .collect()
+        } else {
+            Vec::new()
         };
         let opts = SignOptions {
             field,
@@ -288,8 +310,8 @@ impl Automation {
         self.session.mark_signed(doc_id, signed.clone(), Some(path.clone())).map_err(failed)?;
         // Then its postSign scripts; what they change is a change after signing, not saved yet.
         let after = match &signing {
-            Some(f) => self.session.run_sign_event(doc_id, f, SignEvent::After).map_err(failed)?,
-            None => false,
+            Some(f) if run_scripts => self.session.run_sign_event(doc_id, f, SignEvent::After).map_err(failed)?,
+            _ => false,
         };
         let scripts = self.session.take_js_output(doc_id);
         let doc = self.doc(a)?;
@@ -299,10 +321,13 @@ impl Automation {
             result["form_scripts"] = json!({
                 "before_signing": before,
                 "after_signing": after,
+                "changed": changed,
                 "alerts": scripts.alerts,
                 "errors": scripts.errors,
                 "unsaved_changes": self.doc(a)?.dirty,
             });
+        } else if scripted {
+            result["form_scripts"] = json!({ "skipped": true, "why": "the field has signing scripts; pass run_form_scripts: true to run them" });
         }
         Ok(result)
     }

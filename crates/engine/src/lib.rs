@@ -695,6 +695,11 @@ impl Document {
         self.redo_label().map(Label::as_str)
     }
 
+    /// How many steps Undo can take back: a step still at this depth is still the last one.
+    pub fn undo_depth(&self) -> usize {
+        self.editor.as_ref().map_or(0, |e| e.undo.len())
+    }
+
     /// What Undo would undo, in parts, for an interface that says it in another language.
     pub fn undo_label(&self) -> Option<&Label> {
         self.editor.as_ref().and_then(|e| e.undo.last()).map(|(l, ..)| l)

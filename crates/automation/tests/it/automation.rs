@@ -5767,9 +5767,10 @@ fn signing_with_an_image_typed_or_drawn_graphic_through_tools() {
     assert!(inked(60, 110), "the strokes are drawn");
 }
 
-/// Signing a dynamic form's signature box through sign_document runs its XFA preSign scripts first,
-/// so what they change is signed, and its postSign scripts after, left as unsaved changes; the
-/// result says so and carries their messages. A box without such scripts reports none.
+/// Signing a dynamic form's signature box through sign_document runs its XFA signing scripts only
+/// when asked (run_form_scripts): preSign first, so what it changes is signed, listed field by field,
+/// and postSign after, left as unsaved changes; the result carries their messages. Not asked, they
+/// don't run and the result says the box has them; a box without them reports nothing.
 #[test]
 fn signing_an_xfa_box_runs_its_signing_scripts_through_tools() {
     let dir = workdir("xfa-sign-events");
@@ -5788,8 +5789,29 @@ fn signing_an_xfa_box_runs_its_signing_scripts_through_tools() {
             .unwrap()
             .to_string()
     };
-    let r = ok(&mut a, "sign_document", json!({ "doc": doc, "id": "ada.p12", "password": "secret12", "field": name("sign"), "out": "signed.pdf" }));
+    // Not asked: the scripts don't run, and the result says the box has them.
+    let r = ok(&mut a, "sign_document", json!({ "doc": doc, "id": "ada.p12", "password": "secret12", "field": name("sign"), "out": "unasked.pdf" }));
+    assert_eq!(r["form_scripts"]["skipped"], json!(true), "{r}");
+    let unasked = ok(&mut a, "doc_open", json!({ "path": "unasked.pdf" }))["doc"].as_u64().unwrap();
+    let unasked = ok(&mut a, "form_fields", json!({ "doc": unasked }));
+    assert!(
+        unasked["fields"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f["name"].as_str().is_some_and(|n| n == "when" || n.ends_with(".when[0]")) && f["value"].is_null()),
+        "{unasked}"
+    );
+    let doc = ok(&mut a, "doc_open", json!({ "path": "form.pdf" }))["doc"].as_u64().unwrap();
+    let r = ok(
+        &mut a,
+        "sign_document",
+        json!({ "doc": doc, "id": "ada.p12", "password": "secret12", "field": name("sign"), "out": "signed.pdf", "run_form_scripts": true }),
+    );
     let scripts = &r["form_scripts"];
+    let changed = scripts["changed"].as_array().unwrap();
+    assert_eq!(changed.len(), 1, "only what preSign changed: {r}");
+    assert_eq!((&changed[0]["after"], &changed[0]["read_only"]), (&json!(["signed"]), &json!(true)), "{r}");
     assert_eq!((scripts["before_signing"].as_bool(), scripts["after_signing"].as_bool()), (Some(true), Some(true)), "{r}");
     assert_eq!(scripts["alerts"], json!(["Signing notice"]), "{r}");
     assert_eq!(scripts["unsaved_changes"], json!(true), "the postSign change isn't in the signed file: {r}");
@@ -5809,7 +5831,11 @@ fn signing_an_xfa_box_runs_its_signing_scripts_through_tools() {
     let list = ok(&mut a, "sign_list", json!({ "doc": signed }));
     assert!(list["signatures"].as_array().unwrap().iter().any(|s| s["signed"] == true && s["status"] == "unknown"), "intact: {list}");
     // A box without signing scripts: nothing reported.
-    let r = ok(&mut a, "sign_document", json!({ "doc": signed, "id": "ada.p12", "password": "secret12", "field": name("plain"), "out": "both.pdf" }));
+    let r = ok(
+        &mut a,
+        "sign_document",
+        json!({ "doc": signed, "id": "ada.p12", "password": "secret12", "field": name("plain"), "out": "both.pdf", "run_form_scripts": true }),
+    );
     assert!(r.get("form_scripts").is_none(), "{r}");
     let _ = std::fs::remove_dir_all(&dir);
 }
