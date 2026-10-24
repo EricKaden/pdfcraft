@@ -491,13 +491,16 @@ impl PdfCraftApp {
         let id = view.id;
         let edited = now.as_ref().map(|(name, _)| name.clone());
         use pdfcraft_engine::js::FieldFocus;
+        // From one radio button of a group to another, the focus stays in the group: its own enter
+        // and exit scripts don't run.
+        let crossing = !matches!((&left, &now), (Some((a, _)), Some((b, _))) if a == b);
         for ((name, widget), focus) in [left.map(|l| (l, FieldFocus::Exit)), now.map(|n| (n, FieldFocus::Enter))].into_iter().flatten() {
             // The edited field's value before this script, to tell its untouched draft from typing:
             // the exit of the field left may have changed it already, and the draft with it.
             let before: Option<(String, Vec<String>)> = edited
                 .as_ref()
                 .and_then(|e| self.session.get(id)?.form.iter().find(|f| &f.name == e).map(|f| (crate::forms_ui::draft_text(f), f.value.clone())));
-            match self.session.field_focus(id, &name, widget, focus) {
+            match self.session.field_focus_crossing(id, &name, widget, focus, crossing) {
                 Ok(changed) => {
                     if changed
                         && let Some(info) = self.session.get(id).map(|d| d.info.clone())
@@ -1658,6 +1661,32 @@ mod revert_draft_tests {
             calendar_rect: None,
             calendar_text: None,
         }
+    }
+
+    /// The focus moving into a radio group, between its buttons and out of it runs the group's own
+    /// enter and exit scripts only when it crosses the group: moving between two buttons of it
+    /// runs theirs alone.
+    #[test]
+    fn the_focus_crossing_a_radio_group_runs_its_own_scripts() {
+        let mut app = PdfCraftApp::new();
+        app.open_bytes("group.pdf", None, pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::group_focus_template())).unwrap();
+        let i = app.active.unwrap();
+        let id = app.views[i].id;
+        let group =
+            app.session.get(id).unwrap().form.iter().find(|f| f.kind == pdfcraft_engine::FormFieldKind::Radio).map(|f| f.name.clone()).unwrap();
+        let log = |app: &PdfCraftApp| {
+            app.session.get(id).unwrap().form.iter().find(|f| f.name == "log").and_then(|f| f.value.first().cloned()).unwrap_or_default()
+        };
+        let focus_on = |app: &mut PdfCraftApp, widget: Option<usize>| {
+            app.views[i].forms.focus = widget.map(|widget| Focus { name: group.clone(), widget, ..focus("") });
+            app.process_pending_edits();
+        };
+        focus_on(&mut app, Some(0));
+        assert_eq!(log(&app), "grp enter|r1 enter");
+        focus_on(&mut app, Some(1));
+        assert_eq!(log(&app), "grp enter|r1 enter|r1 exit|r2 enter", "between its buttons the group's scripts don't run");
+        focus_on(&mut app, None);
+        assert_eq!(log(&app), "grp enter|r1 enter|r1 exit|r2 enter|r2 exit|grp exit");
     }
 
     fn app() -> PdfCraftApp {

@@ -757,8 +757,9 @@ impl Automation {
     }
 
     /// `form_focus`: field `field` (its 1-based `widget`) gains (`enter`) or loses (`exit`)
-    /// focus, running its XFA scripts for that event; returns whether the form changed and what
-    /// the scripts showed or asked for.
+    /// focus, running its XFA scripts for that event (a radio group's own too, unless
+    /// `within_group`: the focus moves between two of its buttons); returns whether the form
+    /// changed and what the scripts showed or asked for.
     pub(crate) fn form_focus(&mut self, a: &Args) -> Result<Value> {
         use pdfcraft_engine::js::FieldFocus;
         let focus = match a.str("event")? {
@@ -776,7 +777,8 @@ impl Automation {
             .filter(|w| *w < field.widgets.len().max(1))
             .ok_or_else(|| ToolError::InvalidArgs(format!("widget must be 1 to {} for {name:?}", field.widgets.len().max(1))))?;
         let id = doc.id;
-        let changed = self.session.field_focus(id, name, widget, focus).map_err(failed)?;
+        let crossing = !a.opt_bool("within_group")?.unwrap_or(false);
+        let changed = self.session.field_focus_crossing(id, name, widget, focus, crossing).map_err(failed)?;
         let out = self.session.take_js_output(id);
         let reqs: Vec<Value> = out.requests.iter().map(request_json).collect();
         Ok(json!({ "changed": changed, "alerts": out.alerts, "console": out.console, "requests": reqs, "errors": out.errors }))

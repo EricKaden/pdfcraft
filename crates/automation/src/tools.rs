@@ -367,7 +367,7 @@ pub fn tools() -> Vec<ToolDef> {
         t(
             "form_focus",
             "Move the focus into or out of a field",
-            "A field gains (event enter) or loses (event exit) focus, as when someone clicks or tabs into or out of it, and the dynamic XFA form's enter or exit scripts for it run (other forms have none, and nothing happens). widget picks the radio button or copy of the field (1-based, default 1; see form_fields). What the scripts change is one undoable edit, and none when they change nothing. Changing a field's value (form_fill) runs its exit scripts already, so the next exit of that field doesn't run them again. Returns changed, and the scripts' alerts, console output, requests and errors.",
+            "A field gains (event enter) or loses (event exit) focus, as when someone clicks or tabs into or out of it, and the dynamic XFA form's enter or exit scripts for it run (other forms have none, and nothing happens). widget picks the radio button or copy of the field (1-based, default 1; see form_fields). What the scripts change is one undoable edit, and none when they change nothing. Changing a field's value (form_fill) runs its exit scripts already, so the next exit of that field doesn't run them again. For a radio button the focus also enters or leaves its group, whose own enter scripts run before the button's and exit scripts after; set within_group when the focus moves between two buttons of one group, which runs only theirs. Returns changed, and the scripts' alerts, console output, requests and errors.",
         )
         .with(schema(
             json!({
@@ -375,6 +375,7 @@ pub fn tools() -> Vec<ToolDef> {
                 "field": { "type": "string", "description": "Field name (from form_fields)." },
                 "event": { "type": "string", "enum": ["enter", "exit"] },
                 "widget": { "type": "integer", "minimum": 1, "description": "Widget of the field (1-based, default 1): a radio button of the group, or a copy of the field." },
+                "within_group": { "type": "boolean", "description": "The focus moves between two buttons of one radio group (default false): the group's own enter and exit scripts don't run." },
             }),
             &["doc", "field", "event"],
         )),

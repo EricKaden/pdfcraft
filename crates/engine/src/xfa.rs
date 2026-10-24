@@ -945,6 +945,13 @@ pub(crate) fn widget_som(doc: &pdfcraft_cos::Document, field: &pdfcraft_forms::F
     field.widgets.get(widget).and_then(|w| som_of(w.obj)).or_else(|| som_of(field.obj))
 }
 
+/// The SOM path of the exclusion group the field at `som` is a button of, if it is one.
+pub(crate) fn exclusion_group_of(doc: &pdfcraft_cos::Document, tpl: &Template, som: &str) -> Option<String> {
+    let (parent, _) = som.rsplit_once('.')?;
+    let live = pdfcraft_xfa::form_tree(tpl, pdfcraft_xfa::data_of(doc).as_ref(), &pdfcraft_xfa::overrides(doc));
+    find_container(&live.root, parent, 0).filter(|n| n.kind == Some(NodeKind::ExclGroup)).map(|n| n.som.clone())
+}
+
 /// Does the live form give SOM path `som` an `activity` script?
 pub(crate) fn has_event(doc: &pdfcraft_cos::Document, tpl: &Template, som: &str, activity: &str) -> bool {
     let live = pdfcraft_xfa::form_tree(tpl, pdfcraft_xfa::data_of(doc).as_ref(), &pdfcraft_xfa::overrides(doc));

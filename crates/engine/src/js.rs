@@ -272,9 +272,20 @@ impl Session {
     /// Widget `widget` of field `name` in document `id` gained or lost focus: on a laid-out XFA form,
     /// run the field's `enter` or `exit` scripts, as one undoable edit when they change something
     /// (and none when they don't). An exit that the field's new value already ran (the value's
-    /// change runs it) isn't run a second time. Returns whether the document changed; what the
+    /// change runs it) isn't run a second time. For a radio button the focus also enters or leaves
+    /// its group ([`Session::field_focus_crossing`]). Returns whether the document changed; what the
     /// scripts showed or asked for is in [`Session::take_js_output`].
     pub fn field_focus(&mut self, id: DocId, name: &str, widget: usize, focus: FieldFocus) -> Result<bool, EditError> {
+        self.field_focus_crossing(id, name, widget, focus, true)
+    }
+
+    /// [`Session::field_focus`], saying whether the focus also enters or leaves the radio group
+    /// whose button is widget `widget` (`crossing`); it doesn't when it moves between two buttons
+    /// of one group. As another viewer runs them, entering a group runs the group's enter scripts
+    /// before the button's and leaving it runs the group's exit scripts after the button's, while a
+    /// move between its buttons runs only theirs. Each object's scripts are an undoable edit of
+    /// their own when they change something.
+    pub fn field_focus_crossing(&mut self, id: DocId, name: &str, widget: usize, focus: FieldFocus, crossing: bool) -> Result<bool, EditError> {
         if self.js_off {
             return Ok(false);
         }
@@ -286,16 +297,24 @@ impl Session {
             FieldFocus::Enter => "enter",
             FieldFocus::Exit => "exit",
         };
-        if !crate::xfa::has_event(cos, &tpl, &som, activity) {
-            doc.xfa_exited.remove(&som);
-            return Ok(false);
-        }
-        // Gaining focus starts afresh; losing it runs the exit unless the change just did.
-        if doc.xfa_exited.remove(&som) && focus == FieldFocus::Exit {
-            return Ok(false);
+        let group = if crossing { crate::xfa::exclusion_group_of(cos, &tpl, &som) } else { None };
+        let order: Vec<String> = match focus {
+            FieldFocus::Enter => group.into_iter().chain(std::iter::once(som)).collect(),
+            FieldFocus::Exit => std::iter::once(som).chain(group).collect(),
+        };
+        // Which of them run, decided before any does: each edit forgets the exits a value's
+        // change ran. Gaining focus starts afresh; losing it runs an exit unless the change just did.
+        let mut run = Vec::new();
+        for som in order {
+            let ran = doc.xfa_exited.remove(&som);
+            if crate::xfa::has_event(cos, &tpl, &som, activity) && !(ran && focus == FieldFocus::Exit) {
+                run.push(som);
+            }
         }
         let before = doc.generation;
-        self.apply(id, Edit::XfaEvent { som, activity: activity.into() })?;
+        for som in run {
+            self.apply(id, Edit::XfaEvent { som, activity: activity.into() })?;
+        }
         Ok(self.get(id).is_some_and(|d| d.generation != before))
     }
 
