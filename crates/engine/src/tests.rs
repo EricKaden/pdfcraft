@@ -5273,6 +5273,8 @@ fn an_xfa_form_without_a_template_opens_with_its_placeholder_and_a_warning() {
     assert!(doc.info.warnings.iter().any(|w| w.contains("could not be laid out") && w.contains("no template")), "{:?}", doc.info.warnings);
 }
 
+/// A dynamic form opens laid out with the values its datasets hold, and with the rows its data
+/// adds to a repeating table row.
 #[test]
 fn dynamic_xfa_forms_open_with_the_values_and_rows_of_their_data() {
     let data = "<form><head><familyName>Kaur</familyName><born>2001-02-03</born><answer>Y</answer></head><table><row><what0>a</what0></row><row><what0>b</what0></row><row><what0>c</what0></row></table></form>";

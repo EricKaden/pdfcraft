@@ -279,6 +279,8 @@ fn layout_places_captions_fields_and_sizes_containers_to_their_content() {
     );
 }
 
+/// A table taller than its page continues on the next pages, its header row repeated at the top of
+/// each one.
 #[test]
 fn tables_break_across_pages_and_repeat_their_header_row() {
     let form = layout_xml(&template(40)).unwrap();

@@ -727,6 +727,9 @@ impl<'a> Inspector<'a> {
         me
     }
 
+    /// Fill `info` from the document: its pages, metadata, encryption, outline, fields, XFA kind
+    /// (dynamic when it must be laid out from its template, else static), layers, fonts,
+    /// attachments and open action.
     fn fill(&self, info: &mut DocInfo) {
         // lopdf drops /Encrypt from the trailer once it has decrypted the file.
         info.encrypted = self.doc.encrypted();
