@@ -1757,6 +1757,10 @@ impl Layouter<'_> {
         }
     }
 
+    /// Draw exclusion group `g` in `rect`: its border, then each of its buttons as a radio button
+    /// of one group (the one its data picks chosen), laid out as the group's layout places them. A
+    /// group that must be answered makes each button required. `sib` is the group's index among
+    /// same-named siblings, for its SOM path.
     fn draw_group(&mut self, g: &ExclGroup, rect: Rect, ctx: &Ctx, depth: usize, sib: usize) -> Result<(), XfaError> {
         if let Some(b) = &g.common.border {
             self.draw_border(b, rect)?;

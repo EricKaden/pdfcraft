@@ -299,6 +299,10 @@ fn tables_break_across_pages_and_repeat_their_header_row() {
     assert_eq!(all.len(), all.iter().collect::<std::collections::HashSet<_>>().len(), "field names are unique");
 }
 
+/// Laying a dynamic form out into its PDF replaces the placeholder page with the template's pages
+/// and adds its fields (a radio group once), keeps the XFA packets and `/NeedsRendering` for Adobe's
+/// viewers, writes each `/DR` font as an object of its own, and marks the form so it isn't laid out
+/// twice.
 #[test]
 fn rendering_into_the_pdf_replaces_the_placeholder_page_and_adds_fields() {
     let mut doc = Document::open(Arc::new(shell(&template(2)))).unwrap();

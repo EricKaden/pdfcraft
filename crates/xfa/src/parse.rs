@@ -657,6 +657,9 @@ fn parse_subform(n: XmlNode, warnings: &mut Vec<String>, depth: usize) -> Subfor
     }
 }
 
+/// The template object element `c` stands for (a subform, area, field, draw or exclusion group,
+/// with what it holds), or `None` for anything else and past [`MAX_DEPTH`] levels. What can't be
+/// read faithfully is noted in `warnings`.
 fn parse_node(c: XmlNode, warnings: &mut Vec<String>, depth: usize) -> Option<Node> {
     if depth > MAX_DEPTH {
         return None;
