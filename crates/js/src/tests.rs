@@ -1560,6 +1560,10 @@ mod runtime_highlight {
         assert_eq!(o.error, None);
         assert_eq!(o.value, "false,true", "the script reads back what it set");
         assert_eq!(o.requests, vec![Request::Highlight(true)]);
+        // A script that toggles it over and over asks once, for where it ended.
+        let o = go("for (var i = 0; i < 5001; i++) { app.runtimeHighlight = !app.runtimeHighlight; }", &ev);
+        assert_eq!(o.error, None);
+        assert_eq!(o.requests, vec![Request::Highlight(true)], "one request, the last setting");
     }
 
     /// The same in XFA scripts, where the change is an effect; nothing is asked for when the

@@ -690,7 +690,10 @@ fn set_runtime_highlight(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> Js
     let mut h = host(ctx)?.borrow_mut();
     if h.doc.highlight != on {
         h.doc.highlight = on;
-        h.requests.push(Request::Highlight(on));
+        // Only the setting the script ends with matters: one request, the latest, under the
+        // host's request cap like any other.
+        h.requests.retain(|r| !matches!(r, Request::Highlight(_)));
+        h.request(Request::Highlight(on));
     }
     Ok(JsValue::undefined())
 }
