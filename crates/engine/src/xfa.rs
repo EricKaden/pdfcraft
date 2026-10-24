@@ -715,10 +715,14 @@ impl<'a, 'b> Runner<'a, 'b> {
 
     /// The SOM path of what a click on field `name` (at `som`) turned on or off, when it is a
     /// check box or a radio group: the check box itself, or the group's radio button now on.
-    /// `None` for other fields, and for a group left with no button on.
-    fn clicked(&mut self, name: &str, som: &str) -> Option<String> {
+    /// `None` for other fields, for a group left with no button on, and when the value is still
+    /// `before` (set again, not clicked).
+    fn clicked(&mut self, name: &str, som: &str, before: Option<&Vec<String>>) -> Option<String> {
         use pdfcraft_forms::FieldKind as K;
         let f = self.fields().get(name)?;
+        if before.is_some_and(|b| *b == f.value) {
+            return None;
+        }
         match f.kind {
             K::CheckBox => Some(som.to_string()),
             K::Radio => {
@@ -862,14 +866,22 @@ const TOGGLE_ORDER: [&str; 2] = ["change", "click"];
 /// the calculations once (or only those, after a reset). A check box or radio button runs its
 /// click scripts too ([`TOGGLE_ORDER`]): it changes only when it is clicked, and a click script
 /// reads the new value. A validate script that answers false, or fails, shows its message; the
-/// value stays, as Acrobat marks the field invalid rather than reverting it.
-pub(crate) fn on_changes(doc: &mut pdfcraft_cos::Document, tpl: &Template, names: &[String], run: &mut XfaRun) -> Result<(), String> {
+/// value stays, as Acrobat marks the field invalid rather than reverting it. `before` holds each
+/// field's value before the edit: a check box or radio group set to the value it had runs no
+/// click scripts, since nothing was clicked.
+pub(crate) fn on_changes(
+    doc: &mut pdfcraft_cos::Document,
+    tpl: &Template,
+    names: &[String],
+    before: &HashMap<String, Vec<String>>,
+    run: &mut XfaRun,
+) -> Result<(), String> {
     let mut r = Runner::new(doc, tpl, run, OPEN_BUDGET_MS);
     for name in names {
         let som = r.by_som().iter().find(|(_, f)| *f == name).map(|(s, _)| s.clone());
         let Some(som) = som else { continue };
         let value = r.fields().get(name).map(|f| f.value.join("\n")).unwrap_or_default();
-        let clicked = r.clicked(name, &som);
+        let clicked = r.clicked(name, &som, before.get(name));
         let steps: &[&str] = if clicked.is_some() { &TOGGLE_ORDER } else { &["change"] };
         for activity in steps.iter().copied().chain(["exit"]) {
             // A click's scripts are those of what was clicked; the others are the field's.
