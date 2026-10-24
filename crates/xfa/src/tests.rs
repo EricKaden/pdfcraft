@@ -411,6 +411,38 @@ fn relevant_and_presence_say_where_fields_and_draws_show() {
     assert!(warned[0].contains("-screen"), "{warned:?}");
 }
 
+/// The buttons of an exclusion group show where each one's own `relevant` and presence say,
+/// inside what the group says, as other fields do; a view other than print is warned about.
+#[test]
+fn exclusion_group_buttons_show_where_each_says() {
+    let button = |name: &str, on: &str, attrs: &str| {
+        format!(r#"<field name="{name}" w="2in" h="0.3in" {attrs}><ui><checkButton shape="round"/></ui><items><text>{on}</text></items></field>"#)
+    };
+    let body = format!(
+        r#"<subform name="body" layout="tb" w="7.5in">
+  <exclGroup name="choice" layout="tb" w="3in">{}{}{}{}{}</exclGroup>
+  <exclGroup name="screenGroup" layout="tb" w="3in" relevant="-print">{}</exclGroup>
+ </subform>"#,
+        button("plain", "1", ""),
+        button("screenOnly", "2", r#"relevant="-print""#),
+        button("printOnly", "3", r#"presence="invisible" relevant="+print""#),
+        button("nowhere", "4", r#"presence="invisible""#),
+        button("otherView", "5", r#"relevant="-preview""#),
+        button("printInScreenGroup", "1", r#"relevant="+print""#),
+    );
+    let form = layout_xml(&one_area_form(r#"layout="tb""#, &body)).unwrap();
+    let views_of = |name: &str| widgets(&form.pages[0]).iter().find(|w| w.som.ends_with(&format!(".{name}[0]"))).map(|w| w.views);
+    let (screen, print) = (Views { screen: true, print: false }, Views { screen: false, print: true });
+    assert_eq!(views_of("plain"), Some(Views::ALL));
+    assert_eq!(views_of("screenOnly"), Some(screen));
+    assert_eq!(views_of("printOnly"), Some(print), "an invisible button that +print prints is drawn for print only");
+    assert_eq!(views_of("nowhere"), None, "an invisible button is drawn nowhere");
+    assert_eq!(views_of("otherView"), Some(Views::ALL), "a view other than print is left aside");
+    assert_eq!(views_of("printInScreenGroup"), Some(screen), "+print can't print what its group keeps off paper");
+    let warned: Vec<&String> = form.warnings.iter().filter(|w| w.contains("relevant")).collect();
+    assert!(warned.len() == 1 && warned[0].contains("-preview"), "{:?}", form.warnings);
+}
+
 /// A page count shown only on screen or only in print is filled in like any other, and a view
 /// other than print named on a flowed subform or a table row is warned about as on a draw.
 #[test]
