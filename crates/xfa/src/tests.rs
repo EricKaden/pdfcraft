@@ -388,6 +388,19 @@ fn fields_that_must_be_filled_in_are_required() {
     assert_eq!(leaf("answer"), Some(true), "the radio group field");
     assert_eq!(leaf("optional"), Some(false));
     assert_eq!(leaf("second"), Some(true), "a later button that must be chosen makes its group required");
+    // The buttons themselves carry no Required flag: theirs are the group's.
+    for group in ["answer", "second"] {
+        let field = fields
+            .iter()
+            .map(|f| doc.resolve(f).as_dict().unwrap().clone())
+            .find(|d| d.get(b"T").and_then(|t| doc.resolve(t).as_string().map(|s| s.to_text())).is_some_and(|t| t.contains(group)));
+        let kids = field.and_then(|d| d.get(b"Kids").map(|k| doc.resolve(k).as_array().cloned().unwrap_or_default())).unwrap_or_default();
+        assert!(!kids.is_empty(), "{group} has its buttons as kids");
+        for kid in &kids {
+            let ff = doc.resolve(kid).as_dict().and_then(|d| d.int(b"Ff")).unwrap_or(0);
+            assert_eq!(ff & 2, 0, "{group}: a button is not Required itself");
+        }
+    }
 }
 
 /// A dynamic form's own text that the standard fonts can't draw is laid out anyway and reported
