@@ -39,7 +39,7 @@ that warning and keeps the existing layout and accepted widget values.
   format and keystroke actions from the picture clause), check boxes and radio groups (from
   `exclGroup`), push buttons with Reset / Print / Save As / URI actions recognised from their
   scripts, and signature fields, each named by its SOM path (`form1[0].page1[0].sign[0]`, as
-  fields under one for each step above it) because Adobe's viewers lay a dynamic form out again
+  fields under one for each step above it) because other viewers lay a dynamic form out again
   and find a signature by that name. A box whose path, or a part of it, the file already gives
   another field keeps its own name. Appearance streams are left empty for the forms layer to
   generate. Each field keeps its SOM path in `/PCSom`; the AcroForm gets `/PCXfaLayout` so a saved form is not laid out

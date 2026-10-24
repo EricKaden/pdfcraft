@@ -3041,7 +3041,7 @@ fn full_names(doc: &Document) -> Vec<(String, Dict)> {
 }
 
 /// A laid-out signature field is named by its SOM path, under a generated field for each step
-/// above it, as Adobe's viewers lay a dynamic form out again and find its signature by that name.
+/// above it, as other viewers lay a dynamic form out again and find its signature by that name.
 /// Boxes in one subform share those fields; a new layout replaces them rather than adding more;
 /// taking the XFA out leaves them as ordinary fields.
 #[test]

@@ -483,7 +483,7 @@ impl Emitter<'_> {
                 } else if let Some((above, last)) = self.som_steps(&w.som)
                     && let Some(parent) = self.node(&above)
                 {
-                    // Named by its SOM path, as fields under one for each step above it: Adobe's
+                    // Named by its SOM path, as fields under one for each step above it: other
                     // viewers lay a dynamic form out again and find a signature by that name.
                     d.set(b"T".to_vec(), Object::String(PdfString::text(&last)));
                     d.set(b"Parent".to_vec(), Object::Ref(parent));
