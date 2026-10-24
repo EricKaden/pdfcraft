@@ -1038,9 +1038,9 @@ impl Layouter<'_> {
 
     // ───────────────────────────────────────────────────────────────────────── flow
 
-    /// Flow `node` (a subform; anything else is ignored) into the content areas.
-    /// Flow subform `node` (each instance the data asks for) into the content areas, shown where
-    /// it and what it is inside say ([`Common::views`]); hidden from both, it still takes its room.
+    /// Flow subform `node` (each instance the data asks for; anything else is ignored) into the
+    /// content areas, shown where it and what it is inside say ([`Common::views`]); hidden from
+    /// both, it still takes its room.
     fn flow_subform(&mut self, node: &Node, avail: Option<(f64, f64)>, ctx: &Ctx, depth: usize, sib: usize) -> Result<(), XfaError> {
         self.warn_other_views(node.common());
         let views = self.views.and(node.common().views());
