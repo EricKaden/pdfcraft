@@ -334,6 +334,12 @@ fn dynamic_rendering_is_read_from_the_configuration_only() {
     assert!(!required("<configuration><acrobat><acrobat7><dynamicRender>required</dynamicRender></acrobat7></acrobat></configuration>"));
     assert!(!required("<template><acrobat><acrobat7><dynamicRender>required</dynamicRender></acrobat7></acrobat></template>"));
     assert!(!required("<config><acrobat><acrobat7><dynamicRender>required"), "no end tag");
+    // A data node named `config` before the configuration packet is not the configuration.
+    let data_first = r#"<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/"><xfa:datasets xmlns:xfa="http://www.xfa.org/schema/xfa-data/1.0/"><xfa:data><form><config>x</config></form></xfa:data></xfa:datasets><config xmlns="http://www.xfa.org/schema/xci/3.1/"><acrobat><acrobat7><dynamicRender>required</dynamicRender></acrobat7></acrobat></config><template/></xdp:xdp>"#;
+    assert!(required(data_first), "the configuration packet after a data node named config");
+    let only_data = r#"<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/"><xfa:datasets xmlns:xfa="http://www.xfa.org/schema/xfa-data/1.0/"><xfa:data><config><acrobat><acrobat7><dynamicRender>required</dynamicRender></acrobat7></acrobat></config></xfa:data></xfa:datasets><template/></xdp:xdp>"#;
+    assert!(!required(only_data), "a data node shaped like a configuration");
+    assert!(required("<config><acrobat><acrobat7><dynamicRender>required</dynamicRender></acrobat7></acrobat></config>"), "a bare config packet");
 }
 
 #[test]

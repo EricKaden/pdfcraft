@@ -8,6 +8,10 @@ use crate::XfaError;
 /// Most decoded packet bytes read in total.
 const MAX_XDP: usize = 64 << 20;
 
+/// Most XML nodes read when the XDP is parsed for its configuration, as many as the template
+/// parser allows.
+const MAX_XDP_NODES: u32 = 2_000_000;
+
 /// What was found in the XFA entry.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Packets {
@@ -98,29 +102,30 @@ fn to_text(bytes: &[u8]) -> String {
 }
 
 /// Whether the XDP's configuration packet asks for dynamic rendering: `required` at
-/// `config/acrobat/acrobat7/dynamicRender` (Designer writes it for a dynamic form). The same
-/// names in the template or the data are not the configuration.
+/// `config/acrobat/acrobat7/dynamicRender` (Designer writes it for a dynamic form). The packet is
+/// the `config` child of the `xdp` root (a whole-XDP stream, or an array's packets read in order
+/// between its preamble and postamble), or the document itself when it is a bare `config` packet.
+/// An element of that name anywhere else (a data node, inside the template) is not it. XML that
+/// doesn't parse, or has a DTD, asks for nothing.
 pub(crate) fn requires_dynamic_render(xdp: &str) -> bool {
-    // The configuration packet: from `<config` (not `<configuration…`) to its end tag.
-    let Some(start) = xdp
-        .match_indices("<config")
-        .map(|(i, _)| i)
-        .find(|&i| xdp.get(i + "<config".len()..).and_then(|r| r.chars().next()).is_some_and(|c| c == '>' || c.is_whitespace()))
-    else {
-        return false;
-    };
-    let Some(packet) = xdp.get(start..).and_then(|r| r.find("</config>").and_then(|end| r.get(..end + "</config>".len()))) else {
-        return false;
-    };
-    let Ok(config) = roxmltree::Document::parse(packet) else { return false };
-    let mut node = config.root_element();
-    for name in ["acrobat", "acrobat7", "dynamicRender"] {
-        match node.children().find(|c| c.is_element() && c.tag_name().name() == name) {
-            Some(c) => node = c,
-            None => return false,
-        }
+    let opts = roxmltree::ParsingOptions { allow_dtd: false, nodes_limit: MAX_XDP_NODES };
+    let Ok(doc) = roxmltree::Document::parse_with_options(xdp, opts) else { return false };
+    let root = doc.root_element();
+    /// `n`'s first child element named `name` (any namespace).
+    fn child<'a, 'i>(n: roxmltree::Node<'a, 'i>, name: &str) -> Option<roxmltree::Node<'a, 'i>> {
+        n.children().find(|c| c.is_element() && c.tag_name().name() == name)
     }
-    node.text().is_some_and(|t| t.trim() == "required")
+    let config = match root.tag_name().name() {
+        "config" => Some(root),
+        "xdp" => child(root, "config"),
+        _ => None,
+    };
+    config
+        .and_then(|c| child(c, "acrobat"))
+        .and_then(|a| child(a, "acrobat7"))
+        .and_then(|a| child(a, "dynamicRender"))
+        .and_then(|d| d.text())
+        .is_some_and(|t| t.trim() == "required")
 }
 
 /// Whether the AcroForm holds a signed signature field (`/FT /Sig` with a value), looked for at
