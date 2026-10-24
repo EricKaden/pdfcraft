@@ -307,7 +307,14 @@ impl Automation {
                 return Err(e);
             }
         };
-        write_atomic(&out, &signed)?;
+        if let Err(e) = write_atomic(&out, &signed) {
+            // Not saved, so not signed: what the preSign scripts did is taken back too.
+            if before {
+                let _ = self.session.undo(doc_id);
+                let _ = self.session.take_js_output(doc_id);
+            }
+            return Err(e);
+        }
         let path = out.to_string_lossy().into_owned();
         self.session.mark_signed(doc_id, signed.clone(), Some(path.clone())).map_err(failed)?;
         // Then its postSign scripts; what they change is a change after signing, not saved yet.

@@ -520,7 +520,11 @@ impl PdfCraftApp {
                     return Err(e.to_string());
                 }
             };
-            crate::editing::write_atomically(&path.to_string_lossy(), signed.as_slice()).map_err(|e| format!("Could not save: {e}"))?;
+            if let Err(e) = crate::editing::write_atomically(&path.to_string_lossy(), signed.as_slice()) {
+                // Not saved, so not signed: the preSign step stays pending as well.
+                app.presign = pending;
+                return Err(format!("Could not save: {e}"));
+            }
             // Our own write is not a change on disk to reload (#431).
             #[cfg(not(target_arch = "wasm32"))]
             app.watch.known_now(doc_id, &path.to_string_lossy());

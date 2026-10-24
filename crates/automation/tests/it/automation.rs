@@ -5804,6 +5804,23 @@ fn signing_an_xfa_box_runs_its_signing_scripts_through_tools() {
         "{unasked}"
     );
     let doc = ok(&mut a, "doc_open", json!({ "path": "form.pdf" }))["doc"].as_u64().unwrap();
+    // A signed file that can't be written (`out` is a folder): not signed, and what preSign did
+    // is taken back.
+    std::fs::create_dir_all(dir.join("taken")).unwrap();
+    let failed = a.call(
+        "sign_document",
+        &json!({ "doc": doc, "id": "ada.p12", "password": "secret12", "field": name("sign"), "out": "taken", "run_form_scripts": true }),
+    );
+    assert!(failed.is_err(), "{failed:?}");
+    let now = ok(&mut a, "form_fields", json!({ "doc": doc }));
+    assert!(
+        now["fields"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f["name"].as_str().is_some_and(|n| n == "when" || n.ends_with(".when[0]")) && f["value"].is_null()),
+        "{now}"
+    );
     let r = ok(
         &mut a,
         "sign_document",
