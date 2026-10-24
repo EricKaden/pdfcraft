@@ -3537,6 +3537,27 @@ fn trailing_spaces_do_not_shift_centered_or_right_aligned_text() {
 
 /// `ready` is two events: `ref="$layout"` is layout:ready (`layoutReady`), anything else stays
 /// form:ready (`ready`), in the template and in the live form; page numbering is recognized.
+/// A field's page-number role comes from its layout:ready scripts, also when a form:ready script
+/// comes first; a field whose layout:ready script only reads the count gets none.
+#[test]
+fn page_roles_come_from_layout_ready_scripts() {
+    let xdp = r##"<?xml version="1.0" encoding="UTF-8"?>
+<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/"><template xmlns="http://www.xfa.org/schema/xfa-template/3.3/"><subform name="form" layout="tb">
+<pageSet><pageArea name="p"><contentArea x="0.5in" y="0.5in" w="7.5in" h="10in"/><medium short="8.5in" long="11in"/>
+ <field name="no" id="no" w="1in" h="0.3in"><ui><textEdit/></ui>
+  <event activity="ready" ref="$form"><script contentType="application/x-javascript">this.access = "readOnly";</script></event>
+  <event activity="ready" ref="$layout"><script contentType="application/x-javascript">this.rawValue = xfa.layout.page(this);</script></event>
+ </field>
+ <field name="reads" id="reads" w="1in" h="0.3in"><ui><textEdit/></ui>
+  <event activity="ready" ref="$layout"><script contentType="application/x-javascript">var n = xfa.layout.pageCount(); this.rawValue = "pages: " + n;</script></event>
+ </field>
+</pageArea></pageSet>
+<field name="body" w="1in" h="0.3in"><ui><textEdit/></ui></field>
+</subform></template></xdp:xdp>"##;
+    let (tpl, _) = parse(xdp).unwrap();
+    assert_eq!(tpl.page_roles, vec![("no".to_string(), PageRole::Number)]);
+}
+
 #[test]
 fn a_layout_ready_event_is_told_apart_from_form_ready() {
     let (tpl, _) = parse(&crate::fixtures::layout_ready_template()).unwrap();
@@ -3565,6 +3586,16 @@ fn a_layout_ready_event_is_told_apart_from_form_ready() {
     assert!(formcalc("$ = xfa.layout.pageCount()"));
     assert!(!formcalc("; xfa.layout.pageCount()\n$ = \"pageCount \"\" here\""));
     assert!(formcalc("$ = \"a;b\" ; not a comment's end\n$ = xfa.layout.page($)"), "a ; inside a string isn't a comment");
+    // Only a script that gives its own field the page call's result numbers that field.
+    assert!(!js("other.rawValue = xfa.layout.pageCount(); this.rawValue = 'x';"), "it numbers another field");
+    assert!(!js("var n = xfa.layout.pageCount(); this.rawValue = 'pages: ' + n;"), "it only reads the count");
+    assert!(!js("if (this.rawValue == xfa.layout.page(this)) { }"), "a comparison, not an assignment");
+    assert!(formcalc("$.rawValue = xfa.layout.page($)"));
+    // The calls are matched as whole names, spaces allowed before the parenthesis.
+    assert!(!js("var pageCounter = 1; this.rawValue = pageCounter;"));
+    assert!(!js("this.rawValue = mylayout.page(this);"));
+    assert!(js("this.rawValue = xfa.layout.page (this);"));
+    assert!(js("this.rawValue = xfa . layout . absPage(this);"));
 }
 
 /// `typed_date` rewrites a date typed by another of a field's edit-picture patterns in the first

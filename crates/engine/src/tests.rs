@@ -8081,6 +8081,26 @@ fn exporting_office_keeps_dotted_leader_entries_as_paragraphs() {
     assert!(positions.windows(2).all(|pair| pair[0] < pair[1]), "reading order: {html}");
 }
 
+/// A field whose layout:ready script only reads the page count keeps the value its script gives
+/// it: only a field the script gives the page call's result is numbered by the layout.
+#[test]
+fn a_field_that_only_reads_the_page_count_keeps_its_scripts_value() {
+    let xdp = r##"<?xml version="1.0" encoding="UTF-8"?>
+<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/">
+<template xmlns="http://www.xfa.org/schema/xfa-template/3.3/">
+<subform name="form" layout="tb">
+ <pageSet><pageArea name="front"><contentArea x="0.5in" y="0.5in" w="7.5in" h="10in"/><medium short="8.5in" long="11in"/></pageArea></pageSet>
+ <field name="reads" w="2in" h="0.3in"><ui><textEdit/></ui><event activity="ready" ref="$layout"><script contentType="application/x-javascript">var n = xfa.layout.pageCount(); this.rawValue = "pages: " + n;</script></event></field>
+</subform>
+</template>
+</xdp:xdp>
+"##;
+    let mut s = Session::new();
+    let id = s.open("reads.pdf", None, Arc::new(pdfcraft_xfa::fixtures::shell(xdp)), None).expect("opens");
+    let value = s.get(id).unwrap().form.iter().find(|f| f.name == "reads").map(|f| f.value.clone()).unwrap_or_default();
+    assert_eq!(value, vec!["pages: 1".to_string()]);
+}
+
 /// layout:ready scripts run once on opening: the root's turns field highlighting on (only when it
 /// is off), a field's sets a value and a later script reads the new highlight, while page
 /// numbering is left to the layout. form:ready is another event, and runs too.
