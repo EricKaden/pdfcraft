@@ -138,6 +138,47 @@ fn open_focus(f: &FormField, widget: usize) -> Focus {
     }
 }
 
+/// The keystroke that turned `before` into `after`, with `sel` the editor's selection (or caret)
+/// just before it, as character positions either way round. Typing or pasting replaces the
+/// selection; with only a caret, a deletion is taken from before it (Backspace) or after it
+/// (Delete). Read this way, typing into a run of the same letter is placed where the caret was,
+/// which the text alone can't tell. When the selection doesn't explain the change, the text does
+/// ([`keystroke_between`]).
+pub(crate) fn keystroke_from(before: &str, after: &str, sel: Option<(usize, usize)>) -> pdfcraft_engine::xfa::Keystroke {
+    let (b, a): (Vec<char>, Vec<char>) = (before.chars().collect(), after.chars().collect());
+    // `b[start..end]` replaced gives `a`: the keystroke, when it does.
+    let fits = |start: usize, end: usize| -> Option<pdfcraft_engine::xfa::Keystroke> {
+        let tail = b.len().checked_sub(end)?;
+        let kept = a.len().checked_sub(tail)?;
+        if start > end || start > kept || b.get(..start)? != a.get(..start)? || b.get(end..)? != a.get(kept..)? {
+            return None;
+        }
+        Some(pdfcraft_engine::xfa::Keystroke {
+            prev: before.to_string(),
+            change: a.get(start..kept)?.iter().collect(),
+            sel_start: start,
+            sel_end: end,
+        })
+    };
+    if let Some((p, q)) = sel {
+        let (start, end) = (p.min(q).min(b.len()), p.max(q).min(b.len()));
+        if let Some(k) = fits(start, end) {
+            return k;
+        }
+        if start == end
+            && let Some(gone) = b.len().checked_sub(a.len()).filter(|n| *n > 0)
+        {
+            if let Some(k) = start.checked_sub(gone).and_then(|from| fits(from, start)) {
+                return k;
+            }
+            if let Some(k) = fits(start, start.saturating_add(gone)) {
+                return k;
+            }
+        }
+    }
+    keystroke_between(before, after)
+}
+
 /// The keystroke that turned `before` into `after`: the shortest stretch of `before` that was
 /// replaced (character positions) and what replaced it. Typing `b` after `a` replaces nothing at
 /// 1 with `b`; a backspace there replaces 1..2 with nothing; select-all and typing replaces it all.
@@ -715,6 +756,11 @@ pub(crate) fn overlay(
                     // A field that doesn't scroll takes no more than fits (ISO 32000-2 Table 228).
                     let before = text_box.map(|_| fx.text.clone());
                     let typed_from = fx.text.clone();
+                    let editor_id = egui::Id::new(("form-field", view.id.0, &f.name, focus.widget));
+                    // Where the caret or selection was before this frame's typing.
+                    let typed_at = egui::TextEdit::load_state(ui.ctx(), editor_id)
+                        .and_then(|st| st.cursor.char_range())
+                        .map(|r| (r.primary.index.0, r.secondary.index.0));
                     let mut te = if multiline { egui::TextEdit::multiline(&mut fx.text) } else { egui::TextEdit::singleline(&mut fx.text) };
                     te = te
                         // Wraps (inside the 3 px side margins) at the width the size was fitted to:
@@ -725,7 +771,7 @@ pub(crate) fn overlay(
                         .text_color(Color32::BLACK)
                         .margin(egui::Margin::symmetric(3, 1))
                         .password(f.has(field_flags::PASSWORD))
-                        .id(egui::Id::new(("form-field", view.id.0, &f.name, focus.widget)));
+                        .id(editor_id);
                     if let Some(max) = f.max_len {
                         te = te.char_limit(max);
                     }
@@ -753,7 +799,7 @@ pub(crate) fn overlay(
                     }
                     // A keystroke, for the field's XFA change scripts to see (and maybe rewrite).
                     if fx.text != typed_from && !fx.no_keystroke_scripts {
-                        fx.keystroke = Some(keystroke_between(&typed_from, &fx.text));
+                        fx.keystroke = Some(keystroke_from(&typed_from, &fx.text, typed_at));
                     }
                     if let Some(caret) = fx.caret.take()
                         && let Some(mut st) = egui::TextEdit::load_state(ui.ctx(), r.id)
@@ -1024,6 +1070,21 @@ mod tests {
         assert_eq!(k("abcd", "abXYcd"), ("XY".into(), 2, 2), "a paste in the middle");
         assert_eq!(k("aa", "aaa"), ("a".into(), 2, 2), "a repeated letter");
         assert_eq!(k("héllo", "héllö"), ("ö".into(), 4, 5), "characters, not bytes");
+        // With the editor's caret or selection, a keystroke in a run of one letter is placed where
+        // it happened, which the text alone can't tell.
+        let at = |b: &str, a: &str, sel: (usize, usize)| {
+            let k = keystroke_from(b, a, Some(sel));
+            (k.change, k.sel_start, k.sel_end)
+        };
+        assert_eq!(at("aaa", "aaaa", (1, 1)), ("a".into(), 1, 1), "typed after the first a");
+        assert_eq!(at("aaa", "aa", (2, 2)), ("".into(), 1, 2), "Backspace takes the one before the caret");
+        assert_eq!(at("abc", "ac", (2, 2)), ("".into(), 1, 2), "Backspace");
+        assert_eq!(at("abc", "ac", (1, 1)), ("".into(), 1, 2), "Delete takes the one after the caret");
+        assert_eq!(at("abcd", "aXd", (3, 1)), ("X".into(), 1, 3), "typed over a selection made backwards");
+        assert_eq!(at("abc", "abcZ", (9, 9)), ("Z".into(), 3, 3), "a caret past the end is the end");
+        // A selection that doesn't explain the change (an input method's composition, say) leaves
+        // it to the text.
+        assert_eq!(at("abc", "xbc", (3, 3)), ("x".into(), 0, 1));
         // What the keystroke enters, put back, gives the text after it.
         let ks = keystroke_between("abcd", "abXYcd");
         assert_eq!(ks.applied(&ks.change), "abXYcd");
