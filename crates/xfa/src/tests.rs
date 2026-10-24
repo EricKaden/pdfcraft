@@ -3101,6 +3101,57 @@ fn signature_fields_are_named_by_their_som_path() {
     assert!(!node.contains(NODE_KEY));
 }
 
+/// The terminal field named `full`, down the field tree.
+fn field_ref(doc: &Document, full: &str) -> Option<pdfcraft_cos::ObjRef> {
+    let root = doc.get(doc.root()?);
+    let acro = doc.resolve(root.as_dict()?.get(b"AcroForm")?);
+    let mut todo: Vec<(pdfcraft_cos::ObjRef, String)> =
+        doc.resolve(acro.as_dict()?.get(b"Fields")?).as_array()?.iter().filter_map(Object::as_ref).map(|r| (r, String::new())).collect();
+    while let Some((r, prefix)) = todo.pop() {
+        let d = doc.get(r).as_dict()?.clone();
+        let t = d.get(b"T").map(|t| doc.resolve(t)).and_then(|t| t.as_string().map(|t| t.to_text())).unwrap_or_default();
+        let name = if prefix.is_empty() { t } else { format!("{prefix}.{t}") };
+        if name == full {
+            return Some(r);
+        }
+        let kids = d.get(b"Kids").map(|k| doc.resolve(k)).and_then(|k| k.as_array().cloned()).unwrap_or_default();
+        todo.extend(kids.iter().filter_map(Object::as_ref).map(|k| (k, name.clone())));
+    }
+    None
+}
+
+/// A box signed on a laid-out form stays signed when the form is laid out again (as after a
+/// script adds a row): the new layout's field, named by the same SOM path, holds the same
+/// signature and is locked, and the old field is gone from the AcroForm.
+#[test]
+fn a_signature_on_a_laid_out_box_survives_a_new_layout() {
+    let mut doc = Document::open(Arc::new(shell(&fields_template("")))).unwrap();
+    render_into(&mut doc).unwrap();
+    let som = "form[0].page1[0].sign[0]";
+    let old = field_ref(&doc, som).expect("the box");
+    // Signed as signing does it: a signature dictionary as the field's value, and a picture.
+    let mut sig = Dict::new();
+    sig.set(b"Type".to_vec(), Object::name("Sig"));
+    let sig = doc.add(Object::Dict(sig));
+    let picture = doc.add(Object::Stream(pdfcraft_cos::Stream::from_raw(Dict::new(), b"0 0 1 rg 0 0 10 10 re f".to_vec())));
+    doc.update_dict(old, |d| {
+        d.set(b"V".to_vec(), Object::Ref(sig));
+        let mut ap = Dict::new();
+        ap.set(b"N".to_vec(), Object::Ref(picture));
+        d.set(b"AP".to_vec(), Object::Dict(ap));
+    })
+    .unwrap();
+    let tpl = crate::script::template_of(&doc).unwrap();
+    rerender(&mut doc, &tpl).unwrap();
+    let new = field_ref(&doc, som).expect("still named by its SOM path");
+    assert_ne!(new, old, "a field of the new layout");
+    let d = doc.get(new).as_dict().unwrap().clone();
+    assert_eq!(d.get(b"V").and_then(Object::as_ref), Some(sig), "the same signature");
+    assert_eq!(d.int(b"Ff").unwrap_or(0) & 1, 1, "a signed box is not signed again");
+    let top = pdfcraft_forms_free_fields(&doc);
+    assert_eq!(top.iter().filter(|(name, _)| name == "form[0]").count(), 1, "the old fields are gone");
+}
+
 /// A signature box the file already holds a signature for shows that signature, the file's own
 /// objects, and is locked; the other box stays unsigned.
 #[test]

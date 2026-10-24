@@ -289,9 +289,10 @@ const MAX_FIELDS_SEARCHED: usize = 20_000;
 const MAX_FIELD_DEPTH: usize = 32;
 
 /// The fields the document came with: the full name of each, and the signed signature fields by
-/// full name. Signing applications name a dynamic form's fields by their SOM path
-/// (`form1[0].page1[0].sign[0]`), which is how a laid-out signature box finds its signature.
-/// Fields of an earlier layout pass are not read.
+/// SOM path. Signing applications name a dynamic form's fields by their SOM path
+/// (`form1[0].page1[0].sign[0]`), which is how a laid-out signature box finds its signature. A
+/// field an earlier layout pass generated gives no name, but a signature on it is kept, by its
+/// `/PCSom`, so a new layout keeps the box signed.
 fn existing_fields(doc: &Document, catalog: &Dict) -> (HashMap<String, Signed>, HashSet<String>) {
     let mut out = HashMap::new();
     let mut names = HashSet::new();
@@ -307,7 +308,22 @@ fn existing_fields(doc: &Document, catalog: &Dict) -> (HashMap<String, Signed>, 
         }
         let field = doc.resolve(&field);
         let Some(d) = field.as_dict() else { continue };
-        if d.contains(SOM_KEY) || d.contains(NODE_KEY) {
+        if d.contains(NODE_KEY) {
+            // Generated to name a signature field: only what it holds is looked at.
+            if depth < MAX_FIELD_DEPTH {
+                let kids = d.get(b"Kids").map(|k| doc.resolve(k)).and_then(|k| k.as_array().cloned()).unwrap_or_default();
+                stack.extend(kids.into_iter().map(|k| (k, String::new(), false, depth + 1)));
+            }
+            continue;
+        }
+        if d.contains(SOM_KEY) {
+            let som = d.get(SOM_KEY).map(|s| doc.resolve(s)).and_then(|s| s.as_string().map(|s| s.to_text()));
+            if d.name(b"FT") == Some(b"Sig")
+                && let Some(som) = som
+                && let Some(value) = d.get(b"V").filter(|v| doc.resolve(v).as_dict().is_some())
+            {
+                out.entry(som).or_insert(Signed { value: value.clone(), appearance: d.get(b"AP").cloned() });
+            }
             continue;
         }
         let name = match d.get(b"T").map(|t| doc.resolve(t)).and_then(|t| t.as_string().map(|t| t.to_text())) {
@@ -480,7 +496,8 @@ impl Emitter<'_> {
                         d.set(b"AP".to_vec(), ap.clone());
                     }
                     ff |= 1;
-                } else if let Some((above, last)) = self.som_steps(&w.som)
+                }
+                if let Some((above, last)) = self.som_steps(&w.som)
                     && let Some(parent) = self.node(&above)
                 {
                     // Named by its SOM path, as fields under one for each step above it: other
