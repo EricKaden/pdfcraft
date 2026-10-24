@@ -4012,6 +4012,9 @@ impl Session {
         doc.dirty = true;
         doc.generation += 1;
         doc.edit_notices = notices;
+        // Only this edit's exits are skipped on the next focus loss: one an earlier change ran is
+        // no reason to skip a later one.
+        doc.xfa_exited.clear();
         doc.xfa_exited.extend(exited);
         if !cx.xfa_removed.is_empty() {
             let removed: Vec<String> = cx.xfa_removed.iter().map(|n| format!("{XFA_REMOVED_PREFIX}{n}")).collect();
@@ -4059,6 +4062,8 @@ impl Session {
         }
         doc.edit_notices.clear();
         Self::sync_dirty(doc);
+        // The change whose exit ran is undone (or redone without its scripts): skip no exit.
+        doc.xfa_exited.clear();
         doc.generation += 1;
         Ok(label)
     }
@@ -4088,6 +4093,8 @@ impl Session {
         }
         doc.edit_notices.clear();
         Self::sync_dirty(doc);
+        // The change whose exit ran is undone (or redone without its scripts): skip no exit.
+        doc.xfa_exited.clear();
         doc.generation += 1;
         Ok(label)
     }
