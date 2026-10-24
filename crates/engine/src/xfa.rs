@@ -872,7 +872,8 @@ const TOGGLE_ORDER: [&str; 2] = ["change", "click"];
 /// reads the new value. A validate script that answers false, or fails, shows its message; the
 /// value stays, as Acrobat marks the field invalid rather than reverting it. `before` holds each
 /// field's value before the edit: a check box or radio group set to the value it had runs no
-/// click scripts, since nothing was clicked.
+/// click scripts, since nothing was clicked. A field named twice (a batch that sets it twice)
+/// is compared the second time with what the first left, so it is clicked once at most.
 pub(crate) fn on_changes(
     doc: &mut pdfcraft_cos::Document,
     tpl: &Template,
@@ -881,11 +882,13 @@ pub(crate) fn on_changes(
     run: &mut XfaRun,
 ) -> Result<(), String> {
     let mut r = Runner::new(doc, tpl, run, OPEN_BUDGET_MS);
+    // Each field's value once its scripts have run, for a later mention of the same field.
+    let mut done: HashMap<String, Vec<String>> = HashMap::new();
     for name in names {
         let som = r.by_som().iter().find(|(_, f)| *f == name).map(|(s, _)| s.clone());
         let Some(som) = som else { continue };
         let value = r.fields().get(name).map(|f| f.value.join("\n")).unwrap_or_default();
-        let clicked = r.clicked(name, &som, before.get(name));
+        let clicked = r.clicked(name, &som, done.get(name).or_else(|| before.get(name)));
         let steps: &[&str] = if clicked.is_some() { &TOGGLE_ORDER } else { &["change"] };
         for activity in steps.iter().copied().chain(["exit"]) {
             // A click's scripts are those of what was clicked; the others are the field's.
@@ -899,6 +902,9 @@ pub(crate) fn on_changes(
             if (o.result_bool == Some(false) || o.error.is_some()) && !value.trim().is_empty() {
                 r.alert(ev.message.clone().unwrap_or_else(|| format!("{name}: the value is not valid")));
             }
+        }
+        if let Some(f) = r.fields().get(name) {
+            done.insert(name.clone(), f.value.clone());
         }
     }
     r.calculates()?;

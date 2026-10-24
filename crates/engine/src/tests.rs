@@ -5648,6 +5648,12 @@ fn xfa_check_box_and_radio_button_clicks_run_their_click_scripts() {
     assert!(!after.get(seen.len()..).unwrap_or_default().contains("click"), "{after}");
     let out = s.take_js_output(id);
     assert!(out.alerts.is_empty() && out.requests.is_empty(), "{out:?}");
+    // A batch that turns the check box off twice clicks it once: the second set changes nothing.
+    let off = || Edit::SetFieldValue { name: "agree".into(), value: FieldValue::Check(false) };
+    let seen = log(&s);
+    s.apply(id, Edit::Batch { label: "twice".into(), edits: vec![off(), off()] }).unwrap();
+    let after = log(&s);
+    assert_eq!(after.get(seen.len()..).unwrap_or_default().matches("click 0;").count(), 1, "{after}");
 }
 
 /// Importing data into a dynamic form adds and removes the rows of its repeating subform to
