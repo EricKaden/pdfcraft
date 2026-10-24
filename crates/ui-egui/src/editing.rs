@@ -471,7 +471,7 @@ impl PdfCraftApp {
     }
 
     /// XFA enter and exit scripts for where the focus went on tab `i` since it was last looked at,
-    /// however it moved (a click, Tab or Shift+Tab, Escape, a click on the page, a script): the
+    /// however it moved (a click, Tab or Shift+Tab, Escape, a click on the page): the
     /// field it left runs its exit, then the field it reached runs its enter. The engine skips an
     /// exit the field's committed change already ran. A tab that closes runs nothing: its
     /// document is going away, and a script changing it then would only ask to save it.
