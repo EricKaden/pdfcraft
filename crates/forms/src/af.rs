@@ -118,7 +118,7 @@ impl Actions {
     /// doesn't read, as typed.
     pub fn keystroke(&self, field: &str, value: &str) -> Result<String, String> {
         match keystroke(&self.format, field, value) {
-            Err(_) if self.xfa_date => Ok(value.trim().to_string()),
+            Err(_) if self.xfa_date => Ok(value.to_string()),
             checked => checked,
         }
     }
@@ -1805,6 +1805,7 @@ mod tests {
             assert_eq!(xfa(fmt).keystroke("Date", typed), Ok(typed.to_string()), "{typed} in {fmt}");
             assert!(plain(fmt).keystroke("Date", typed).is_err(), "an ordinary date field refuses {typed}");
         }
+        assert_eq!(xfa("mm/dd/yyyy").keystroke("Date", "  pending  "), Ok("  pending  ".to_string()), "spaces and all");
         // Shown: in the pattern, as it is; an ISO date, in the pattern; anything else as typed,
         // where an ordinary field's looser reading would show a date the value doesn't hold.
         let ymd = xfa("yyyymmdd");
