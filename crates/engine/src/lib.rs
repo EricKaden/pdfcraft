@@ -2481,6 +2481,21 @@ struct EditCtx {
 }
 
 impl EditCtx {
+    /// The field highlight (`app.runtimeHighlight`) the edit's next script reads: the field
+    /// scripts' runner holds it while there is one (its scripts change it there), else the edit.
+    fn highlight(&self) -> bool {
+        self.js.as_ref().map_or(self.highlight, |js| js.doc.highlight)
+    }
+
+    /// A script changed the field highlight: both script runtimes of the edit read the new one,
+    /// so a later edit of a batch sees it whichever kind of script it runs.
+    fn set_highlight(&mut self, on: bool) {
+        self.highlight = on;
+        if let Some(js) = self.js.as_mut() {
+            js.doc.highlight = on;
+        }
+    }
+
     /// The context for one edit: `now` (the session's clock) dates it, and with `salt` seeds the
     /// ids it makes.
     fn new(now: Option<i64>, salt: u64) -> Self {
@@ -2682,13 +2697,14 @@ fn run_edit(doc: &mut pdfcraft_cos::Document, edit: &Edit, cx: &mut EditCtx) -> 
         },
         Edit::XfaEvent { som, activity } => {
             let tpl = cx.xfa.clone().ok_or_else(|| EditError::Invalid("this is not a laid-out XFA form, or JavaScript is off".into()))?;
-            let mut run =
-                xfa::XfaRun { page_count: cx.pages, out: &mut cx.xfa_out, datasets: cx.xfa_datasets, ran_away: false, highlight: cx.highlight };
+            let highlight = cx.highlight();
+            let mut run = xfa::XfaRun { page_count: cx.pages, out: &mut cx.xfa_out, datasets: cx.xfa_datasets, ran_away: false, highlight };
             let ran = xfa::on_event(doc, &tpl, som, activity, &mut run);
             cx.xfa_datasets = run.datasets;
             cx.xfa_ran_away |= run.ran_away;
             // The next edit of a batch reads the highlight this one's scripts set.
-            cx.highlight = run.highlight;
+            let on = run.highlight;
+            cx.set_highlight(on);
             ran.map_err(EditError::Invalid)?;
         }
         Edit::SetFieldImage { name, image } => {
@@ -3481,13 +3497,15 @@ fn image_content_type(bytes: &[u8]) -> Option<&'static str> {
 /// fields take the data's values.
 fn xfa_after_data_change(doc: &mut pdfcraft_cos::Document, cx: &mut EditCtx, calculate: bool) -> Result<(), EditError> {
     if let Some(tpl) = cx.xfa.clone() {
-        let mut run = xfa::XfaRun { page_count: cx.pages, out: &mut cx.xfa_out, datasets: cx.xfa_datasets, ran_away: false, highlight: cx.highlight };
+        let highlight = cx.highlight();
+        let mut run = xfa::XfaRun { page_count: cx.pages, out: &mut cx.xfa_out, datasets: cx.xfa_datasets, ran_away: false, highlight };
         let r = guard(|| xfa::on_data_replaced(doc, &tpl, calculate, &mut run))
             .unwrap_or_else(|m| Err(format!("laying the form out again failed unexpectedly ({m})")));
         cx.xfa_datasets = run.datasets;
         cx.xfa_ran_away |= run.ran_away;
         // The next edit of a batch reads the highlight this one's scripts set.
-        cx.highlight = run.highlight;
+        let on = run.highlight;
+        cx.set_highlight(on);
         if let Err(e) = r {
             cx.xfa_out.errors.push(e);
         }
@@ -4067,8 +4085,8 @@ impl Session {
             let mut reset = false;
             collect(&edit, &mut changed, &mut reset);
             if !changed.is_empty() || reset {
-                let mut run =
-                    xfa::XfaRun { page_count: cx.pages, out: &mut cx.xfa_out, datasets: cx.xfa_datasets, ran_away: false, highlight: cx.highlight };
+                let highlight = cx.highlight();
+                let mut run = xfa::XfaRun { page_count: cx.pages, out: &mut cx.xfa_out, datasets: cx.xfa_datasets, ran_away: false, highlight };
                 // Every changed field's scripts, then the calculations once (after a reset,
                 // only those).
                 let ran = guard(|| xfa::on_changes(&mut next, &tpl, &changed, &mut run))
@@ -4076,7 +4094,8 @@ impl Session {
                 cx.xfa_datasets = run.datasets;
                 cx.xfa_ran_away |= run.ran_away;
                 // The next edit of a batch reads the highlight this one's scripts set.
-                cx.highlight = run.highlight;
+                let on = run.highlight;
+                cx.set_highlight(on);
                 if let Err(e) = ran {
                     cx.xfa_out.errors.push(e);
                 }
