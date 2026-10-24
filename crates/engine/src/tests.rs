@@ -5266,6 +5266,19 @@ fn focus_scripts_that_change_nothing_leave_the_document_clean() {
     assert!(!s.get(id).unwrap().dirty);
 }
 
+/// A widget the field doesn't have gains or loses no focus: no script runs, rather than the
+/// field's own.
+#[test]
+fn a_widget_the_field_doesnt_have_runs_no_focus_scripts() {
+    use crate::js::FieldFocus::{Enter, Exit};
+    let mut s = Session::new();
+    let id = s.open("form.pdf", None, focus_form(), None).expect("opens");
+    assert!(!s.field_focus(id, "probe", 3, Enter).unwrap(), "probe has one widget");
+    assert!(!s.field_focus(id, "probe", usize::MAX, Exit).unwrap());
+    assert_eq!((field_text(&s, id, "enters"), field_text(&s, id, "exits")), ("0".into(), "0".into()));
+    assert!(!s.get(id).unwrap().dirty);
+}
+
 /// Each radio button of a group is a field of its own: reaching the second button runs its
 /// enter script, reaching the first (which has none) runs nothing. Choosing the button changes
 /// the group's value, which runs the group's scripts, not the button's: leaving the button

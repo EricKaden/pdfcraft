@@ -936,13 +936,16 @@ pub(crate) fn on_focus(doc: &mut pdfcraft_cos::Document, tpl: &Template, som: &s
 }
 
 /// The SOM path of widget `widget` of field `field`: each radio button of a group has its own,
-/// and a field's copies on several pages share one.
+/// and a field's copies on several pages share one. `None` when the field has no widget
+/// `widget`: the field's own path is only for a widget that records none, so a widget index
+/// out of range never reaches the field (for a radio field, the group).
 pub(crate) fn widget_som(doc: &pdfcraft_cos::Document, field: &pdfcraft_forms::Field, widget: usize) -> Option<String> {
     let som_of = |obj: pdfcraft_cos::ObjRef| {
         let object = doc.get(obj);
         object.as_dict()?.get(pdfcraft_xfa::SOM_KEY).map(|s| doc.resolve(s))?.as_string().map(|s| s.to_text())
     };
-    field.widgets.get(widget).and_then(|w| som_of(w.obj)).or_else(|| som_of(field.obj))
+    let w = field.widgets.get(widget)?;
+    som_of(w.obj).or_else(|| som_of(field.obj))
 }
 
 /// Does the live form give SOM path `som` an `activity` script?
