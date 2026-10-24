@@ -253,6 +253,11 @@ impl Automation {
         // A dynamic form's signing scripts run only when asked: what preSign changes is signed,
         // and the caller hasn't seen it. What they changed is listed.
         let run_scripts = a.opt_bool("run_form_scripts")?.unwrap_or(false);
+        // Every argument is read before the preSign scripts change anything, so a bad one is
+        // refused with the document as it was.
+        let reason = a.opt_str("reason")?.map(str::to_string);
+        let location = a.opt_str("location")?.map(str::to_string);
+        let contact = a.opt_str("contact")?.map(str::to_string);
         let signing = field.clone();
         let scripted = signing.as_deref().is_some_and(|f| {
             self.session.sign_event_scripted(doc_id, f, SignEvent::Before) || self.session.sign_event_scripted(doc_id, f, SignEvent::After)
@@ -278,19 +283,8 @@ impl Automation {
         } else {
             Vec::new()
         };
-        let opts = SignOptions {
-            field,
-            page,
-            rect,
-            reason: a.opt_str("reason")?.map(str::to_string),
-            location: a.opt_str("location")?.map(str::to_string),
-            contact: a.opt_str("contact")?.map(str::to_string),
-            certify,
-            appearance,
-            appearance_labels,
-            graphic,
-            ..SignOptions::default()
-        };
+        let opts =
+            SignOptions { field, page, rect, reason, location, contact, certify, appearance, appearance_labels, graphic, ..SignOptions::default() };
         let signed = self.session.sign(doc_id, &id, opts).map_err(|e| match e {
             // A graphic the signer refuses is the caller's to fix.
             pdfcraft_engine::EditError::Sign(m) if m.starts_with("the signature graphic") => bad(m),
