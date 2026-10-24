@@ -1570,7 +1570,11 @@ fn choice_lists_signatures_passwords_and_pictures_become_fields_and_images() {
     assert_eq!(opt[0].as_string().unwrap().to_text(), "English", "same shown text and value: a plain string");
     assert_eq!(field("other").int(b"Ff"), Some((1 << 17) | (1 << 18)), "an editable combo box");
     assert_eq!(field("pin").int(b"Ff"), Some(1 << 13), "a password field");
-    assert_eq!(field("sign").name(b"FT"), Some(b"Sig".as_slice()));
+    // The signature field is named by its SOM path, under a generated field for each step above it.
+    assert!(fields.iter().all(|(name, _)| name != "sign"));
+    let named = full_names(&doc);
+    let sign = named.iter().find(|(name, _)| name == "form[0].page1[0].sign[0]").map(|(_, d)| d).expect("named by its SOM path");
+    assert_eq!(sign.name(b"FT"), Some(b"Sig".as_slice()));
     let streams: Vec<pdfcraft_cos::Stream> = doc
         .object_numbers()
         .into_iter()
@@ -3009,6 +3013,92 @@ fn a_zero_caption_reserve_sizes_the_caption_as_none_does() {
     assert!((x_of("withZero") - x_of("without")).abs() < 0.01, "as without a reserve: {} {}", x_of("withZero"), x_of("without"));
 }
 
+/// The terminal fields by full name, down the field tree.
+fn full_names(doc: &Document) -> Vec<(String, Dict)> {
+    let root = doc.get(doc.root().unwrap());
+    let acro = doc.resolve(root.as_dict().unwrap().get(b"AcroForm").unwrap());
+    let mut todo: Vec<(Object, String)> =
+        doc.resolve(acro.as_dict().unwrap().get(b"Fields").unwrap()).as_array().unwrap().iter().map(|f| (f.clone(), String::new())).collect();
+    let mut out = Vec::new();
+    while let Some((f, prefix)) = todo.pop() {
+        let d = doc.resolve(&f).as_dict().unwrap().clone();
+        let t = d.get(b"T").map(|t| doc.resolve(t)).and_then(|t| t.as_string().map(|t| t.to_text()));
+        let name = match t {
+            Some(t) if prefix.is_empty() => t,
+            Some(t) => format!("{prefix}.{t}"),
+            None => prefix,
+        };
+        match d.get(b"Kids").map(|k| doc.resolve(k)).and_then(|k| k.as_array().cloned()) {
+            Some(kids) if kids.iter().any(|k| doc.resolve(k).as_dict().is_some_and(|k| k.contains(b"T"))) => {
+                todo.extend(kids.into_iter().map(|k| (k, name.clone())));
+            }
+            _ => out.push((name, d)),
+        }
+    }
+    out
+}
+
+/// A laid-out signature field is named by its SOM path, under a generated field for each step
+/// above it, as Adobe's viewers lay a dynamic form out again and find its signature by that name.
+/// Boxes in one subform share those fields; a new layout replaces them rather than adding more;
+/// taking the XFA out leaves them as ordinary fields.
+#[test]
+fn signature_fields_are_named_by_their_som_path() {
+    let xdp = r##"<?xml version="1.0" encoding="UTF-8"?>
+<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/">
+<template xmlns="http://www.xfa.org/schema/xfa-template/3.3/">
+<subform name="form" layout="tb">
+ <pageSet><pageArea name="page"><contentArea x="0.5in" y="0.5in" w="7.5in" h="10in"/><medium short="8.5in" long="11in"/></pageArea></pageSet>
+ <subform name="body" layout="tb" w="7.5in">
+  <field name="name" w="3in" h="0.3in"><ui><textEdit/></ui></field>
+  <field name="sign" w="3in" h="1in"><ui><signature/></ui></field>
+  <field name="other" w="3in" h="1in"><ui><signature/></ui></field>
+ </subform>
+ <subform name="end" layout="tb" w="7.5in">
+  <field name="last" w="3in" h="1in"><ui><signature/></ui></field>
+ </subform>
+</subform>
+</template>
+</xdp:xdp>
+"##;
+    let mut doc = Document::open(Arc::new(shell(xdp))).unwrap();
+    let report = render_into(&mut doc).unwrap();
+    assert_eq!(report.fields, 4, "name and the three signature fields");
+    let doc = Document::open(Arc::new(write_incremental(&doc, &SaveOptions::default()).unwrap())).unwrap();
+    let check = |doc: &Document| {
+        let top: Vec<String> = pdfcraft_forms_free_fields(doc).into_iter().map(|(name, _)| name).collect();
+        assert_eq!(top.iter().filter(|n| *n == "form[0]").count(), 1, "one field for the root subform: {top:?}");
+        assert!(top.iter().any(|n| n == "name"), "other fields keep their names: {top:?}");
+        let named = full_names(doc);
+        for som in ["form[0].body[0].sign[0]", "form[0].body[0].other[0]", "form[0].end[0].last[0]"] {
+            let (_, d) = named.iter().find(|(name, _)| name == som).unwrap_or_else(|| panic!("{som} in {named:?}"));
+            assert_eq!(d.name(b"FT"), Some(b"Sig".as_slice()));
+            assert_eq!(fields_by_som(doc).get(som).map(String::as_str), Some(som), "the data finds it by its SOM path");
+        }
+        assert_eq!(named.len(), 4, "{named:?}");
+    };
+    check(&doc);
+    let body = |doc: &Document| {
+        let named = full_names(doc);
+        let parent = |som: &str| named.iter().find(|(name, _)| name == som).and_then(|(_, d)| d.get(b"Parent").and_then(Object::as_ref));
+        (parent("form[0].body[0].sign[0]"), parent("form[0].body[0].other[0]"))
+    };
+    let (a, b) = body(&doc);
+    assert!(a.is_some() && a == b, "the two boxes of one subform share its field");
+    // Laid out again: the same fields, not a second set.
+    let mut doc = doc;
+    let tpl = crate::script::template_of(&doc).unwrap();
+    rerender(&mut doc, &tpl).unwrap();
+    check(&doc);
+    // The XFA taken out: ordinary fields with the same names, without the private key.
+    strip(&mut doc).unwrap();
+    let named = full_names(&doc);
+    assert!(named.iter().any(|(name, _)| name == "form[0].end[0].last[0]"), "{named:?}");
+    let top = pdfcraft_forms_free_fields(&doc);
+    let node = top.iter().find(|(name, _)| name == "form[0]").map(|(_, d)| d.clone()).expect("the root subform's field");
+    assert!(!node.contains(NODE_KEY));
+}
+
 #[test]
 fn a_signed_signature_box_shows_the_signature_the_file_holds() {
     let mut doc = Document::open(Arc::new(crate::fixtures::signed_shell())).unwrap();
@@ -3017,7 +3107,10 @@ fn a_signed_signature_box_shows_the_signature_the_file_holds() {
     let acro = doc.resolve(catalog.as_dict().unwrap().get(b"AcroForm").unwrap());
     let fields = doc.resolve(acro.as_dict().unwrap().get(b"Fields").unwrap()).as_array().unwrap().clone();
     let laid: Vec<_> = fields.iter().map(|f| doc.resolve(f)).filter(|f| f.as_dict().unwrap().contains(SOM_KEY)).collect();
+    // The file has a field named `form[0]` already: the unsigned box keeps its own name rather
+    // than repeat that one.
     let (signed, unsigned) = (laid[0].as_dict().unwrap(), laid[1].as_dict().unwrap());
+    assert_eq!(unsigned.get(b"T").and_then(|t| t.as_string()).map(|t| t.to_text()).as_deref(), Some("other"));
     // The signature dictionary and the picture are the file's own objects, not copies.
     let value = doc.resolve(signed.get(b"V").unwrap());
     assert_eq!(value.as_dict().unwrap().name(b"Type"), Some(&b"Sig"[..]));

@@ -590,8 +590,12 @@ pub fn rerender(doc: &mut Document, tpl: &Template) -> Result<Report, XfaError> 
     let Some(root) = doc.root() else { return Err(XfaError::NotXfa) };
     if let Some((acro_ref, mut acro)) = acroform(doc) {
         let fields = acro.get(b"Fields").map(|f| doc.resolve(f)).and_then(|f| f.as_array().cloned()).unwrap_or_default();
-        let kept: Vec<Object> =
-            fields.into_iter().filter(|f| f.as_ref().is_none_or(|r| doc.get(r).as_dict().is_none_or(|d| !d.contains(crate::pdf::SOM_KEY)))).collect();
+        let kept: Vec<Object> = fields
+            .into_iter()
+            .filter(|f| {
+                f.as_ref().is_none_or(|r| doc.get(r).as_dict().is_none_or(|d| !d.contains(crate::pdf::SOM_KEY) && !d.contains(crate::pdf::NODE_KEY)))
+            })
+            .collect();
         acro.set(b"Fields".to_vec(), Object::Array(kept));
         match acro_ref {
             Some(r) => doc.set(r, Object::Dict(acro)),

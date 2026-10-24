@@ -5456,7 +5456,8 @@ fn xfa_choice_lists_signature_and_picture_fields_open_fill_script_and_save() {
     assert_eq!(langs.value, vec!["English".to_string(), "Spanish".to_string()]);
     assert!(field(&s, "other").has(pdfcraft_forms::flags::EDIT));
     assert!(field(&s, "pin").has(pdfcraft_forms::flags::PASSWORD));
-    assert_eq!(field(&s, "sign").kind, K::Signature);
+    // The signature field is named by its SOM path, as another viewer finds a signature.
+    assert_eq!(field(&s, "form[0].page1[0].sign[0]").kind, K::Signature);
     // Scripts read a choice list's saved value.
     assert_eq!(field(&s, "summary").value, vec!["Country: JP".to_string()], "{:?}", s.take_js_output(id));
     // Choosing another item recalculates; the list takes several values; a typed value is kept
