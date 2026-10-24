@@ -299,6 +299,41 @@ fn tables_break_across_pages_and_repeat_their_header_row() {
     assert_eq!(all.len(), all.iter().collect::<std::collections::HashSet<_>>().len(), "field names are unique");
 }
 
+/// A form a viewer saved with its pages drawn, holding only its signature box, is laid out from
+/// its template when its configuration says it must be rendered dynamically: its other fields
+/// live there. Signed, it is left as saved (laying it out would change what was signed), as it is
+/// without that configuration or with `forbidden`.
+#[test]
+fn a_form_saved_with_its_pages_is_laid_out_when_it_requires_dynamic_rendering() {
+    let open = |render: &str, signed: bool| Document::open(Arc::new(crate::fixtures::saved_with_pages_shell(render, signed))).unwrap();
+    let mut doc = open("required", false);
+    assert!(is_dynamic(&doc));
+    let report = render_into(&mut doc).unwrap();
+    assert_eq!(report.fields, 2, "the text field from the template, and the signature box");
+    assert!(!is_dynamic(&open("required", true)), "signed: left as saved");
+    assert!(!is_dynamic(&open("", false)), "no configuration: the fields it has are the form's");
+    assert!(!is_dynamic(&open("forbidden", false)));
+}
+
+/// Only the configuration packet's `acrobat/acrobat7/dynamicRender` asks for dynamic rendering:
+/// not the same element elsewhere, another element that starts with `config`, or another value.
+#[test]
+fn dynamic_rendering_is_read_from_the_configuration_only() {
+    let required = crate::packets::requires_dynamic_render;
+    let config = |inner: &str| {
+        format!(
+            r#"<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/"><config xmlns="http://www.xfa.org/schema/xci/3.1/">{inner}</config><template/></xdp:xdp>"#
+        )
+    };
+    assert!(required(&config("<acrobat><acrobat7><dynamicRender> required </dynamicRender></acrobat7></acrobat>")));
+    assert!(!required(&config("<acrobat><acrobat7><dynamicRender>forbidden</dynamicRender></acrobat7></acrobat>")));
+    assert!(!required(&config("<acrobat><dynamicRender>required</dynamicRender></acrobat>")), "not under acrobat7");
+    assert!(!required(&config("")));
+    assert!(!required("<configuration><acrobat><acrobat7><dynamicRender>required</dynamicRender></acrobat7></acrobat></configuration>"));
+    assert!(!required("<template><acrobat><acrobat7><dynamicRender>required</dynamicRender></acrobat7></acrobat></template>"));
+    assert!(!required("<config><acrobat><acrobat7><dynamicRender>required"), "no end tag");
+}
+
 #[test]
 fn rendering_into_the_pdf_replaces_the_placeholder_page_and_adds_fields() {
     let mut doc = Document::open(Arc::new(shell(&template(2)))).unwrap();

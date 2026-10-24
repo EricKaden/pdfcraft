@@ -809,8 +809,15 @@ impl<'a> Inspector<'a> {
             // A form with no fields is taken to be laid out from its template, unless its
             // configuration says it is a static form (#3180): Designer writes
             // `<dynamicRender>forbidden</dynamicRender>` for one, whose pages are the form.
-            let static_form = self.xfa_dynamic_render(xfa).as_deref() == Some("forbidden");
-            info.xfa = Some(if needs_rendering || (info.fields.is_empty() && !static_form) { Xfa::Dynamic } else { Xfa::Static });
+            let render = self.xfa_dynamic_render(xfa);
+            let static_form = render.as_deref() == Some("forbidden");
+            // A form a viewer saved with its pages drawn, whose configuration says it must be
+            // rendered dynamically, is laid out from its template too: its fields live there.
+            // Not once it is signed: the signature covers the pages as saved (the xfa crate's
+            // `is_dynamic` keeps the same rule).
+            let signed = info.fields.iter().any(|f| f.kind == FieldKind::Signature && f.value.is_some());
+            let required = render.as_deref() == Some("required") && !signed;
+            info.xfa = Some(if needs_rendering || required || (info.fields.is_empty() && !static_form) { Xfa::Dynamic } else { Xfa::Static });
         }
         self.layers(catalog, &mut info.layers);
         info.layer_groups = self.layer_groups(catalog);

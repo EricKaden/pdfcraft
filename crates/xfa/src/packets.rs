@@ -97,6 +97,64 @@ fn to_text(bytes: &[u8]) -> String {
     }
 }
 
+/// Whether the XDP's configuration packet asks for dynamic rendering: `required` at
+/// `config/acrobat/acrobat7/dynamicRender` (Designer writes it for a dynamic form). The same
+/// names in the template or the data are not the configuration.
+pub(crate) fn requires_dynamic_render(xdp: &str) -> bool {
+    // The configuration packet: from `<config` (not `<configuration…`) to its end tag.
+    let Some(start) = xdp
+        .match_indices("<config")
+        .map(|(i, _)| i)
+        .find(|&i| xdp.get(i + "<config".len()..).and_then(|r| r.chars().next()).is_some_and(|c| c == '>' || c.is_whitespace()))
+    else {
+        return false;
+    };
+    let Some(packet) = xdp.get(start..).and_then(|r| r.find("</config>").and_then(|end| r.get(..end + "</config>".len()))) else {
+        return false;
+    };
+    let Ok(config) = roxmltree::Document::parse(packet) else { return false };
+    let mut node = config.root_element();
+    for name in ["acrobat", "acrobat7", "dynamicRender"] {
+        match node.children().find(|c| c.is_element() && c.tag_name().name() == name) {
+            Some(c) => node = c,
+            None => return false,
+        }
+    }
+    node.text().is_some_and(|t| t.trim() == "required")
+}
+
+/// Whether the AcroForm holds a signed signature field (`/FT /Sig` with a value), looked for at
+/// most 32 levels deep and among at most 10 000 fields.
+pub(crate) fn has_signature(doc: &Document) -> bool {
+    let Some(root) = doc.root() else { return false };
+    let catalog = doc.get(root);
+    let Some(acro) = catalog.as_dict().and_then(|c| c.get(b"AcroForm")).map(|a| doc.resolve(a)) else { return false };
+    let Some(fields) = acro.as_dict().and_then(|a| a.get(b"Fields")).map(|f| doc.resolve(f)) else { return false };
+    let Some(fields) = fields.as_array() else { return false };
+    // (field, inherited field type, depth)
+    let mut todo: Vec<(Object, bool, usize)> = fields.iter().map(|f| (f.clone(), false, 0)).collect();
+    let mut seen = std::collections::HashSet::new();
+    let mut budget = 10_000usize;
+    while let Some((f, sig_above, depth)) = todo.pop() {
+        if budget == 0 || depth > 32 || f.as_ref().is_some_and(|r| !seen.insert(r)) {
+            continue;
+        }
+        budget -= 1;
+        let f = doc.resolve(&f);
+        let Some(d) = f.as_dict() else { continue };
+        let sig = d.name(b"FT").map_or(sig_above, |t| t == b"Sig");
+        if sig && d.get(b"V").is_some_and(|v| !matches!(&*doc.resolve(v), Object::Null)) {
+            return true;
+        }
+        if let Some(kids) = d.get(b"Kids").map(|k| doc.resolve(k))
+            && let Some(kids) = kids.as_array()
+        {
+            todo.extend(kids.iter().map(|k| (k.clone(), sig, depth + 1)));
+        }
+    }
+    false
+}
+
 /// Read the XFA packets, if the document has any.
 pub fn read_packets(doc: &Document) -> Result<Option<Packets>, XfaError> {
     let Some(root) = doc.root() else { return Ok(None) };

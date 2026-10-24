@@ -674,6 +674,46 @@ pub fn signed_shell() -> Vec<u8> {
     assemble(objs)
 }
 
+/// A dynamic form as a viewer saves it with its pages drawn: no `/NeedsRendering`, a page with
+/// the form's picture, and only its signature box `sign` among the AcroForm's fields (the text
+/// field `name` lives in the template), signed when `signed`. Its configuration packet says
+/// `<dynamicRender>{render}</dynamicRender>` (none when `render` is empty).
+pub fn saved_with_pages_shell(render: &str, signed: bool) -> Vec<u8> {
+    let config = if render.is_empty() {
+        String::new()
+    } else {
+        format!(
+            r#"<config xmlns="http://www.xfa.org/schema/xci/3.1/"><present><pdf><version>1.7</version></pdf></present><acrobat><acrobat7><dynamicRender>{render}</dynamicRender></acrobat7></acrobat></config>"#
+        )
+    };
+    let xdp = format!(
+        r##"<?xml version="1.0" encoding="UTF-8"?>
+<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/">
+{config}
+<template xmlns="http://www.xfa.org/schema/xfa-template/3.3/">
+<subform name="form" layout="tb">
+ <pageSet><pageArea name="page"><contentArea x="0.5in" y="0.5in" w="7.5in" h="10in"/><medium short="8.5in" long="11in"/></pageArea></pageSet>
+ <field name="name" w="3in" h="0.3in"><ui><textEdit/></ui></field>
+ <field name="sign" w="3in" h="1in"><ui><signature/></ui></field>
+</subform>
+</template>
+</xdp:xdp>
+"##
+    );
+    let value = if signed { " /V 7 0 R" } else { "" };
+    let picture = "BT /F1 12 Tf 72 700 Td (Name: ______) Tj ET";
+    let objs: Vec<Vec<u8>> = vec![
+        b"<< /Type /Catalog /Pages 2 0 R /AcroForm << /XFA 5 0 R /Fields [6 0 R] /SigFlags 3 >> >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Annots [6 0 R] >>".to_vec(),
+        format!("<< /Length {} >>\nstream\n{picture}\nendstream", picture.len()).into_bytes(),
+        format!("<< /Length {} >>\nstream\n{xdp}\nendstream", xdp.len()).into_bytes(),
+        format!("<< /T (form[0].sign[0]) /FT /Sig{value} /Type /Annot /Subtype /Widget /Rect [72 500 288 572] /P 3 0 R >>").into_bytes(),
+        b"<< /Type /Sig /Name (A Signer) >>".to_vec(),
+    ];
+    assemble(objs)
+}
+
 /// A check box `kind` whose change script, once it is checked, opens the protected check box
 /// `leave` and shows the invisible field `details`, then fails on an object the form doesn't
 /// have (as scripts written for an earlier version of a form do).

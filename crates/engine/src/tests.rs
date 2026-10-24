@@ -5288,6 +5288,29 @@ fn dynamic_xfa_forms_open_with_the_values_and_rows_of_their_data() {
     assert!(!doc.dirty);
 }
 
+/// A dynamic form a viewer saved with its pages drawn holds only its signature box, so it opened as
+/// a picture with nothing to fill in. When its configuration says it must be rendered dynamically
+/// it is laid out from its template on opening, and its text field can be filled; once signed, it
+/// opens as saved, its pages and signature untouched.
+#[test]
+fn a_form_saved_with_its_pages_that_requires_dynamic_rendering_is_laid_out_unless_signed() {
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let unsigned = Arc::new(pdfcraft_xfa::fixtures::saved_with_pages_shell("required", false));
+    let id = s.open("saved.pdf", None, unsigned, None).expect("opens");
+    let doc = s.get(id).unwrap();
+    assert_eq!(doc.info.xfa, Some(pdfcraft_render::Xfa::Dynamic));
+    assert!(doc.xfa.is_some(), "laid out from the template");
+    let name = doc.form.iter().find(|f| f.name.contains("name")).map(|f| f.name.clone()).expect("the template's text field");
+    s.apply(id, Edit::SetFieldValue { name: name.clone(), value: FieldValue::Text("Ada".into()) }).expect("fills");
+    assert_eq!(s.get(id).unwrap().form.iter().find(|f| f.name == name).map(|f| f.value.clone()), Some(vec!["Ada".to_string()]));
+    let signed = Arc::new(pdfcraft_xfa::fixtures::saved_with_pages_shell("required", true));
+    let id = s.open("signed.pdf", None, signed.clone(), None).expect("opens");
+    let doc = s.get(id).unwrap();
+    assert_eq!(doc.info.xfa, Some(pdfcraft_render::Xfa::Static), "signed: as saved");
+    assert!(doc.xfa.is_none(), "nothing was laid out");
+    assert_eq!(doc.bytes[..], signed[..], "no revision was appended on open");
+}
+
 /// #3180: an XFA form with no fields whose configuration says `dynamicRender` is `forbidden` is a
 /// static form: its pages are the form. Opening it used to lay the template out into new pages
 /// and write them as a revision, so even a save with no change replaced the pages.
