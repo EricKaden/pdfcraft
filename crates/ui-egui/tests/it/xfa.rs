@@ -132,7 +132,7 @@ fn click_field(h: &mut Harness<'static, PdfCraftApp>, name: &str) {
 #[test]
 fn xfa_check_box_and_radio_clicks_run_their_click_scripts_in_the_app() {
     let mut h = open(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::toggle_template()));
-    wait_for_pages(&mut h);
+    crate::support::settle(&mut h);
     // What the scripts have written to the form's log field so far.
     let log = |h: &Harness<'static, PdfCraftApp>| {
         let s = h.state();
