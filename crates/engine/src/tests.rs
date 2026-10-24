@@ -5144,7 +5144,8 @@ fn field_text(s: &Session, id: DocId, name: &str) -> String {
 
 /// A radio group's own enter and exit scripts run when the focus enters or leaves the group, as
 /// another viewer ran them on a synthetic form: the group's enter before the button's, its exit
-/// after the button's. A move between two buttons of the group runs only the buttons' scripts.
+/// after the button's. A move between two buttons of the group runs only the buttons' scripts,
+/// and a button the group doesn't have runs nothing.
 #[test]
 fn a_radio_groups_own_enter_and_exit_run_when_the_focus_crosses_the_group() {
     use crate::js::FieldFocus::{Enter, Exit};
@@ -5153,6 +5154,8 @@ fn a_radio_groups_own_enter_and_exit_run_when_the_focus_crosses_the_group() {
         s.open("group.pdf", None, Arc::new(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::group_focus_template())), None).expect("opens");
     let group = s.get(id).unwrap().form.iter().find(|f| f.kind == pdfcraft_forms::FieldKind::Radio).map(|f| f.name.clone()).expect("the radio group");
     let log = |s: &Session| field_text(s, id, "log");
+    assert!(!s.field_focus(id, &group, 2, Enter).unwrap(), "the group has two buttons, and no third reaches the group");
+    assert_eq!(log(&s), "");
     assert!(s.field_focus(id, &group, 0, Enter).unwrap());
     assert_eq!(log(&s), "grp enter|r1 enter", "into the group");
     s.field_focus_crossing(id, &group, 0, Exit, false).unwrap();
