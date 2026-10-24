@@ -8135,6 +8135,26 @@ fn an_edits_xfa_and_field_scripts_share_the_field_highlight() {
     assert!(!cx.highlight(), "the next XFA script reads the field scripts' change");
 }
 
+/// In a batch of XFA events, a later event's scripts read the page count an earlier one's layout
+/// left: `grow`'s click shows a tall section (a second page), and `count`'s click, in the same
+/// batch, records `xfa.layout.pageCount()`.
+#[test]
+fn a_later_xfa_event_in_a_batch_reads_the_page_count_an_earlier_one_left() {
+    let xdp = pdfcraft_xfa::fixtures::ready_events_template().replace(
+        "<field name=\"log\"",
+        r#"<field name="count" w="1in" h="0.3in"><ui><button/></ui><event activity="click"><script contentType="application/x-javascript">xfa.form.form.seen.rawValue = String(xfa.layout.pageCount());</script></event></field>
+ <field name="seen" w="1in" h="0.3in"><ui><textEdit/></ui></field>
+ <field name="log""#,
+    );
+    let mut s = Session::new();
+    let id = s.open("batch.pdf", None, Arc::new(pdfcraft_xfa::fixtures::shell(&xdp)), None).expect("opens");
+    let click = |som: &str| Edit::XfaEvent { som: som.into(), activity: "click".into() };
+    s.apply(id, Edit::Batch { edits: vec![click("form[0].grow[0]"), click("form[0].count[0]")], label: "Click".into() }).expect("clicks");
+    assert_eq!(s.get(id).unwrap().info.pages.len(), 2);
+    let seen = s.get(id).unwrap().form.iter().find(|f| f.name == "seen").map(|f| f.value.clone()).unwrap_or_default();
+    assert_eq!(seen, vec!["2".to_string()]);
+}
+
 /// In a batch of XFA events, a later event's scripts read the field highlight an earlier one's set:
 /// `on`'s click turns it on, and `look`'s click, in the same batch, records what it reads.
 #[test]

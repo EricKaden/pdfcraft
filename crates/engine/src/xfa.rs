@@ -756,8 +756,11 @@ impl<'a, 'b> Runner<'a, 'b> {
         let (ready, numbered) = {
             let live = self.live();
             let ready: Vec<ScriptEvent> = live.events.iter().filter(|e| e.activity == "layoutReady").cloned().collect();
-            let numbered: HashSet<String> =
-                ready.iter().filter(|e| pdfcraft_xfa::numbers_pages(&e.script, e.formcalc) && is_field(&live.root, &e.som, 0)).map(|e| e.som.clone()).collect();
+            let numbered: HashSet<String> = ready
+                .iter()
+                .filter(|e| pdfcraft_xfa::numbers_pages(&e.script, e.formcalc) && is_field(&live.root, &e.som, 0))
+                .map(|e| e.som.clone())
+                .collect();
             (ready, numbered)
         };
         self.numbered = numbered;
