@@ -527,9 +527,8 @@ impl PdfCraftApp {
             app.session.mark_signed(doc_id, signed, Some(path.to_string_lossy().into_owned())).map_err(|e| e.to_string())?;
             // Then its postSign scripts; what they change is a change after signing, to save.
             // What they say shows once signing is done, after the notice that it was saved.
-            if let Some(f) = &field {
-                app.session.run_sign_event(doc_id, f, pdfcraft_engine::js::SignEvent::After).map_err(|e| e.to_string())?;
-            }
+            // The file is signed and saved by now: a postSign step that fails is said, not a failure.
+            let after = field.as_deref().and_then(|f| app.session.run_sign_event(doc_id, f, pdfcraft_engine::js::SignEvent::After).err());
             let said = app.session.take_js_output(doc_id);
             #[cfg(target_os = "macos")]
             crate::macos_association::repair(&path);
@@ -540,6 +539,9 @@ impl PdfCraftApp {
             app.right = Some(crate::RightPanel::Signatures);
             app.notify_fmt("Signed and saved to {path}", &[("path", &path.display().to_string())]);
             app.handle_js(doc_id, said);
+            if let Some(e) = after {
+                app.notify_fmt("Signed and saved, but the form's postSign script couldn't finish: {e}", &[("e", &e.to_string())]);
+            }
             Ok(())
         };
         match self.save_override.clone() {

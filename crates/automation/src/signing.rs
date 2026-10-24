@@ -309,11 +309,16 @@ impl Automation {
         let path = out.to_string_lossy().into_owned();
         self.session.mark_signed(doc_id, signed.clone(), Some(path.clone())).map_err(failed)?;
         // Then its postSign scripts; what they change is a change after signing, not saved yet.
-        let after = match &signing {
-            Some(f) if run_scripts => self.session.run_sign_event(doc_id, f, SignEvent::After).map_err(failed)?,
-            _ => false,
+        // The file is signed and saved by now: a postSign step that fails is reported, not an error.
+        let (after, after_error) = match &signing {
+            Some(f) if run_scripts => match self.session.run_sign_event(doc_id, f, SignEvent::After) {
+                Ok(ran) => (ran, None),
+                Err(e) => (true, Some(format!("the postSign step couldn't finish: {e}"))),
+            },
+            _ => (false, None),
         };
-        let scripts = self.session.take_js_output(doc_id);
+        let mut scripts = self.session.take_js_output(doc_id);
+        scripts.errors.extend(after_error);
         let doc = self.doc(a)?;
         let newest = doc.signatures.iter().filter(|s| s.signed).max_by_key(|s| s.revision).cloned();
         let mut result = json!({ "path": path, "bytes": signed.len(), "signature": newest.map(|s| self.sig_json(a, &s)).transpose()? });
