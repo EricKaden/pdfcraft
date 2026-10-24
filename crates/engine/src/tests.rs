@@ -5430,6 +5430,33 @@ fn an_xfa_form_without_a_template_opens_with_its_placeholder_and_a_warning() {
     assert!(doc.info.warnings.iter().any(|w| w.contains("could not be laid out") && w.contains("no template")), "{:?}", doc.info.warnings);
 }
 
+/// Each keystroke in a laid-out text field runs the field's change scripts, which see it as another
+/// viewer gives it (what was typed, the text before and after, the selection it replaced) and may
+/// rewrite what it enters: digits only, capitals in FormCalc. A field without change scripts says
+/// so, and nothing in the document changes.
+#[test]
+fn xfa_change_scripts_see_and_rewrite_each_keystroke() {
+    use crate::xfa::Keystroke;
+    let mut s = Session::new();
+    let id = s.open("keys.pdf", None, Arc::new(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::keystroke_template())), None).expect("opens");
+    let generation = s.get(id).unwrap().generation;
+    let ks = |prev: &str, change: &str, sel_start: usize, sel_end: usize| Keystroke { prev: prev.into(), change: change.into(), sel_start, sel_end };
+    assert_eq!(s.field_keystroke(id, "digits", 0, &ks("", "a1b2", 0, 0)).unwrap().as_deref(), Some("12"));
+    assert_eq!(s.field_keystroke(id, "upper", 0, &ks("", "abc", 0, 0)).unwrap().as_deref(), Some("ABC"));
+    assert_eq!(s.field_keystroke(id, "plain", 0, &ks("", "x", 0, 0)).unwrap(), None);
+    // As another viewer showed them for the same typing: `a`, `b`, a backspace, select-all and `q`.
+    for (k, want) in [
+        (ks("", "a", 0, 0), "change=[a] new=[a] prev=[] sel=0-0"),
+        (ks("a", "b", 1, 1), "change=[b] new=[ab] prev=[a] sel=1-1"),
+        (ks("ab", "", 1, 2), "change=[] new=[a] prev=[ab] sel=1-2"),
+        (ks("a", "q", 0, 1), "change=[q] new=[q] prev=[a] sel=0-1"),
+    ] {
+        assert_eq!(s.field_keystroke(id, "seen", 0, &k).unwrap().as_deref(), Some(k.change.as_str()));
+        assert_eq!(s.take_js_output(id).alerts, vec![want.to_string()]);
+    }
+    assert_eq!(s.get(id).unwrap().generation, generation, "keystrokes change nothing in the document");
+}
+
 #[test]
 fn dynamic_xfa_forms_open_with_the_values_and_rows_of_their_data() {
     let data = "<form><head><familyName>Kaur</familyName><born>2001-02-03</born><answer>Y</answer></head><table><row><what0>a</what0></row><row><what0>b</what0></row><row><what0>c</what0></row></table></form>";

@@ -78,6 +78,11 @@ pub struct XfaEvent {
     pub target: String,
     pub new_text: String,
     pub prev_text: String,
+    /// A change script run for a keystroke: what was typed or pasted (`xfa.event.change`, empty
+    /// for a deletion) in place of the characters `sel_start..sel_end` of `prev_text`.
+    pub change: String,
+    pub sel_start: usize,
+    pub sel_end: usize,
 }
 
 /// About the document.
@@ -145,6 +150,9 @@ pub struct XfaOutcome {
     /// The script ran past its time limit and was left running on its own thread (the engine
     /// can't interrupt it): the caller should run no more of this form's scripts.
     pub abandoned: bool,
+    /// A change script's `xfa.event.change` when it ended: the text a keystroke enters, which the
+    /// script may have rewritten (cut to the length a value keeps).
+    pub change: Option<String>,
 }
 
 /// Most nodes a snapshot may hold.
@@ -225,8 +233,9 @@ fn payload(e: &XfaEffect) -> usize {
     }
 }
 
-/// A script's completion value (what a calculate script puts in its field) cut to
-/// [`MAX_VALUE`] characters, as values a script sets are, with a note when it was.
+/// A script's completion value (what a calculate script puts in its field), and the text a change
+/// script left in `xfa.event.change`, cut to [`MAX_VALUE`] characters as values a script sets
+/// are, with a note when one was.
 pub(crate) fn clip_result(out: &mut XfaOutcome) {
     if let Some(r) = out.result.take() {
         let (r, cut) = clip_value(r);
@@ -234,6 +243,13 @@ pub(crate) fn clip_result(out: &mut XfaOutcome) {
             out.notes.push(format!("the script's result was longer than {MAX_VALUE} characters; it was cut"));
         }
         out.result = Some(r);
+    }
+    if let Some(c) = out.change.take() {
+        let (c, cut) = clip_value(c);
+        if cut {
+            out.notes.push(format!("the text a change script entered was longer than {MAX_VALUE} characters; it was cut"));
+        }
+        out.change = Some(c);
     }
 }
 
@@ -1301,10 +1317,10 @@ fn install(ctx: &mut Context, event: &XfaEvent, doc: &XfaDoc, current: usize) ->
         .property(js_string!("newText"), s(&event.new_text), Attribute::all())
         .property(js_string!("prevText"), s(&event.prev_text), Attribute::all())
         .property(js_string!("fullText"), s(&event.new_text), Attribute::all())
-        .property(js_string!("change"), s(""), Attribute::all())
+        .property(js_string!("change"), s(&event.change), Attribute::all())
         .property(js_string!("target"), this_node.clone(), Attribute::all())
-        .property(js_string!("selStart"), JsValue::from(0.0), Attribute::all())
-        .property(js_string!("selEnd"), JsValue::from(0.0), Attribute::all())
+        .property(js_string!("selStart"), JsValue::from(event.sel_start as f64), Attribute::all())
+        .property(js_string!("selEnd"), JsValue::from(event.sel_end as f64), Attribute::all())
         .property(js_string!("cancelAction"), JsValue::from(false), Attribute::all())
         .property(js_string!("reenter"), JsValue::from(false), Attribute::all())
         .property(js_string!("shift"), JsValue::from(false), Attribute::all())
@@ -1630,6 +1646,12 @@ pub(crate) fn run_here(script: &str, event: &XfaEvent, doc: &XfaDoc, root: XfaNo
         // Direct eval inside a function called on the node: `this` is the node and the
         // completion value is the script's last expression (what a calculate script yields).
         let r = ctx.eval(Source::from_bytes(b"(function () { return eval(__xfa_src); }).call(__xfa_this)"))?;
+        if event.activity == "change" {
+            // What the keystroke enters now: the script may have rewritten `xfa.event.change`.
+            let xfa_event = ctx.eval(Source::from_bytes(b"(typeof xfa === 'object' && xfa !== null) ? xfa.event : undefined"))?;
+            let change = xfa_event.as_object().map(|e| e.get(js_string!("change"), &mut ctx)).transpose()?;
+            out.change = change.map(|c| text(&c, &mut ctx).unwrap_or_default());
+        }
         if !r.is_undefined() {
             // Best effort: a value that can't be made text (a symbol, say) is no failure.
             out.result = Some(text(&r, &mut ctx).unwrap_or_default());

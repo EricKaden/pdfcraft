@@ -1057,9 +1057,11 @@ impl Interp<'_> {
                 "name" => Val::Str(self.event.activity.clone()),
                 "newtext" | "fulltext" => Val::Str(self.event.new_text.clone()),
                 "prevtext" => Val::Str(self.event.prev_text.clone()),
-                "change" => Val::Str(String::new()),
+                "change" => Val::Str(self.event.change.clone()),
                 "target" => Val::Node(self.h.current),
-                "selstart" | "selend" | "cancelaction" | "reenter" | "shift" | "modifier" | "keydown" | "commitkey" => Val::Num(0.0),
+                "selstart" => Val::Num(self.event.sel_start as f64),
+                "selend" => Val::Num(self.event.sel_end as f64),
+                "cancelaction" | "reenter" | "shift" | "modifier" | "keydown" | "commitkey" => Val::Num(0.0),
                 _ => Val::Sink,
             }),
             Val::Xfa => Ok(match name.to_ascii_lowercase().as_str() {
@@ -1661,6 +1663,11 @@ impl Interp<'_> {
                 if want.is_finite() && want >= 0.0 {
                     self.h.set_instances(parent, &name, want as usize);
                 }
+                Ok(())
+            }
+            // A change script rewrites what the keystroke enters (`$event.change = ""`).
+            Val::Event if prop.eq_ignore_ascii_case("change") => {
+                self.event.change = self.to_str(&v);
                 Ok(())
             }
             _ => Ok(()),
@@ -2608,6 +2615,9 @@ pub(crate) fn run_formcalc_at(
             }
         }
         Err(e) => out.error = Some(e),
+    }
+    if event.activity == "change" {
+        out.change = Some(interp.event.change.clone());
     }
     out.notes = host.notes();
     out.effects = host.effects;

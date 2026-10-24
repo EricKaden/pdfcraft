@@ -42,6 +42,13 @@ pub struct Focus {
     /// The text the calendar last saw, so it moves to a typed date once, when the typing becomes
     /// a whole date, and otherwise keeps the month its arrows turned to.
     pub calendar_text: Option<String>,
+    /// What was typed this frame, for the field's XFA change scripts to see
+    /// (`PdfCraftApp::run_keystroke_scripts`); taken once they ran.
+    pub(crate) keystroke: Option<pdfcraft_engine::xfa::Keystroke>,
+    /// The field has no change scripts: its keystrokes stand as typed.
+    pub(crate) no_keystroke_scripts: bool,
+    /// Where the caret goes next frame, after a change script rewrote what was typed.
+    pub(crate) caret: Option<usize>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -125,6 +132,26 @@ fn open_focus(f: &FormField, widget: usize) -> Focus {
         calendar: None,
         calendar_rect: None,
         calendar_text: None,
+        keystroke: None,
+        no_keystroke_scripts: false,
+        caret: None,
+    }
+}
+
+/// The keystroke that turned `before` into `after`: the shortest stretch of `before` that was
+/// replaced (character positions) and what replaced it. Typing `b` after `a` replaces nothing at
+/// 1 with `b`; a backspace there replaces 1..2 with nothing; select-all and typing replaces it all.
+pub(crate) fn keystroke_between(before: &str, after: &str) -> pdfcraft_engine::xfa::Keystroke {
+    let (b, a): (Vec<char>, Vec<char>) = (before.chars().collect(), after.chars().collect());
+    let prefix = b.iter().zip(&a).take_while(|(x, y)| x == y).count();
+    // At most what is left of the shorter text once the prefix is taken: the two never overlap.
+    let room = b.len().min(a.len()).saturating_sub(prefix);
+    let suffix = b.iter().rev().zip(a.iter().rev()).take(room).take_while(|(x, y)| x == y).count();
+    pdfcraft_engine::xfa::Keystroke {
+        prev: before.to_string(),
+        change: a.get(prefix..a.len().saturating_sub(suffix)).unwrap_or_default().iter().collect(),
+        sel_start: prefix,
+        sel_end: b.len().saturating_sub(suffix),
     }
 }
 
@@ -687,6 +714,7 @@ pub(crate) fn overlay(
                     ui.visuals_mut().text_cursor.stroke.color = crate::edit_text_ui::caret_color_on(FIELD_FILL);
                     // A field that doesn't scroll takes no more than fits (ISO 32000-2 Table 228).
                     let before = text_box.map(|_| fx.text.clone());
+                    let typed_from = fx.text.clone();
                     let mut te = if multiline { egui::TextEdit::multiline(&mut fx.text) } else { egui::TextEdit::singleline(&mut fx.text) };
                     te = te
                         // Wraps (inside the 3 px side margins) at the width the size was fitted to:
@@ -722,6 +750,16 @@ pub(crate) fn overlay(
                             }
                             ui.ctx().request_repaint();
                         }
+                    }
+                    // A keystroke, for the field's XFA change scripts to see (and maybe rewrite).
+                    if fx.text != typed_from && !fx.no_keystroke_scripts {
+                        fx.keystroke = Some(keystroke_between(&typed_from, &fx.text));
+                    }
+                    if let Some(caret) = fx.caret.take()
+                        && let Some(mut st) = egui::TextEdit::load_state(ui.ctx(), r.id)
+                    {
+                        st.cursor.set_char_range(Some(egui::text::CCursorRange::one(egui::text::CCursor::new(caret))));
+                        st.store(ui.ctx(), r.id);
                     }
                     if let Some(press) = fx.press.take()
                         && let Some((galley, pos)) = laid_out
@@ -965,7 +1003,31 @@ mod tests {
             calendar: None,
             calendar_rect: None,
             calendar_text: None,
+            keystroke: None,
+            no_keystroke_scripts: false,
+            caret: None,
         }
+    }
+
+    /// A keystroke is read off the text before and after it as another viewer reports it to a
+    /// change script: typing, a deletion, a replaced selection, a paste in the middle.
+    #[test]
+    fn a_keystroke_is_the_shortest_replaced_stretch() {
+        let k = |b: &str, a: &str| {
+            let k = keystroke_between(b, a);
+            (k.change, k.sel_start, k.sel_end)
+        };
+        assert_eq!(k("", "a"), ("a".into(), 0, 0));
+        assert_eq!(k("a", "ab"), ("b".into(), 1, 1));
+        assert_eq!(k("ab", "a"), ("".into(), 1, 2), "backspace");
+        assert_eq!(k("a", "q"), ("q".into(), 0, 1), "select all, then type");
+        assert_eq!(k("abcd", "abXYcd"), ("XY".into(), 2, 2), "a paste in the middle");
+        assert_eq!(k("aa", "aaa"), ("a".into(), 2, 2), "a repeated letter");
+        assert_eq!(k("héllo", "héllö"), ("ö".into(), 4, 5), "characters, not bytes");
+        // What the keystroke enters, put back, gives the text after it.
+        let ks = keystroke_between("abcd", "abXYcd");
+        assert_eq!(ks.applied(&ks.change), "abXYcd");
+        assert_eq!(ks.applied("Z"), "abZcd");
     }
 
     /// An untouched draft takes the value a script gave the field; typing is kept.

@@ -251,6 +251,9 @@ impl PdfCraftApp {
     /// Returns false when a field refused the typing queued for it (its editor is open again).
     pub(crate) fn process_pending_edits(&mut self) -> bool {
         let Some(i) = self.active else { return true };
+        // What was typed this frame goes through the field's change scripts before anything
+        // commits it.
+        self.run_keystroke_scripts(i);
         let applied = self.apply_queued_edit(i);
         // After the queued edit: a value typed into the field the focus left has been taken (and
         // its change has run the field's exit) before the focus scripts run.
@@ -472,6 +475,38 @@ impl PdfCraftApp {
             view.forms.focus = Some(draft);
         }
         false
+    }
+
+    /// The keystroke typed this frame in the focused text field of tab `i`: on a laid-out XFA
+    /// form its change scripts run ([`pdfcraft_engine::Session::field_keystroke`]) and may rewrite
+    /// what it enters, which the editor then shows, caret after it, from the next frame. A field
+    /// without change scripts is asked once: its later keystrokes stand as typed.
+    fn run_keystroke_scripts(&mut self, i: usize) {
+        let Some(view) = self.views.get_mut(i) else { return };
+        let id = view.id;
+        let Some((name, widget, ks)) = view.forms.focus.as_mut().and_then(|f| f.keystroke.take().map(|k| (f.name.clone(), f.widget, k))) else {
+            return;
+        };
+        match self.session.field_keystroke(id, &name, widget, &ks) {
+            Ok(entered) => {
+                if let Some(fx) = self.views.get_mut(i).and_then(|v| v.forms.focus.as_mut()).filter(|f| f.name == name && f.widget == widget) {
+                    match entered {
+                        None => fx.no_keystroke_scripts = true,
+                        Some(entered) if entered != ks.change => {
+                            fx.text = ks.applied(&entered);
+                            fx.caret = Some(ks.sel_start.saturating_add(entered.chars().count()));
+                            if let Some(ctx) = &self.ctx {
+                                ctx.request_repaint();
+                            }
+                        }
+                        Some(_) => {}
+                    }
+                }
+                let out = self.session.take_js_output(id);
+                self.handle_js(id, out);
+            }
+            Err(e) => self.notify_error(e),
+        }
     }
 
     /// XFA enter and exit scripts for where the focus went on tab `i` since it was last looked at,
@@ -1657,6 +1692,9 @@ mod revert_draft_tests {
             calendar: None,
             calendar_rect: None,
             calendar_text: None,
+            keystroke: None,
+            no_keystroke_scripts: false,
+            caret: None,
         }
     }
 
