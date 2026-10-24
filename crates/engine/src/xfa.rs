@@ -861,9 +861,10 @@ pub(crate) fn on_open(doc: &mut pdfcraft_cos::Document, tpl: &Template, run: &mu
 }
 
 /// What a click on a check box or radio button runs once it has set the value, in order: the
-/// field's change scripts (a radio group's, as for any value change), then the click scripts of
-/// what was clicked (the check box, or the radio button now on). Their exit scripts follow, as
-/// after any change. The order is to be confirmed on a synthetic form in another viewer.
+/// change scripts, then the click scripts, each reading the new value. A radio group runs each
+/// activity's scripts, then the radio button now on runs its own; the button it turned off runs
+/// none. Exit scripts follow, as after any change: the button's, then the group's. This is the
+/// order another viewer showed on a synthetic form.
 const TOGGLE_ORDER: [&str; 2] = ["change", "click"];
 
 /// After fields `names` took new values: each one's change, exit and validate scripts, then
@@ -890,11 +891,15 @@ pub(crate) fn on_changes(
         let value = r.fields().get(name).map(|f| f.value.join("\n")).unwrap_or_default();
         let clicked = r.clicked(name, &som, done.get(name).or_else(|| before.get(name)));
         let steps: &[&str] = if clicked.is_some() { &TOGGLE_ORDER } else { &["change"] };
+        // A radio group's button now on runs each activity's scripts after the group's, and
+        // its exit scripts before the group's, as when leaving it.
+        let button = clicked.as_deref().filter(|b| *b != som);
         for activity in steps.iter().copied().chain(["exit"]) {
-            // A click's scripts are those of what was clicked; the others are the field's.
-            let at = if activity == "click" { clicked.as_deref().unwrap_or(&som) } else { som.as_str() };
-            for ev in r.events_of(at, activity) {
-                r.run(&ev, &value)?;
+            let order = if activity == "exit" { [button, Some(som.as_str())] } else { [Some(som.as_str()), button] };
+            for at in order.into_iter().flatten() {
+                for ev in r.events_of(at, activity) {
+                    r.run(&ev, &value)?;
+                }
             }
         }
         for ev in r.events_of(&som, "validate") {

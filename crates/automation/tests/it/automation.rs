@@ -7253,7 +7253,7 @@ fn xfa_scripts_run_for_buttons_and_field_changes_through_tools() {
 }
 
 /// Filling an XFA check box or radio group through form_fill clicks it, as the app does: the
-/// field's change scripts, then the click scripts of what was clicked.
+/// change scripts, then the click scripts, a radio group's before those of the button now on.
 #[test]
 fn xfa_check_box_and_radio_clicks_run_through_form_fill() {
     let dir = workdir("xfa-toggle");
@@ -7277,7 +7277,7 @@ fn xfa_check_box_and_radio_clicks_run_through_form_fill() {
     let answer = fields["fields"].as_array().unwrap().iter().find(|f| f["name"] == "answer").cloned().expect("the radio group");
     let no = answer["options"].as_array().and_then(|o| o.get(1)).and_then(|o| o.as_str().map(str::to_string)).unwrap_or_else(|| panic!("{answer}"));
     ok(&mut a, "form_fill", json!({ "doc": doc, "values": { "answer": no } }));
-    assert!(log(&mut a).ends_with("no click;"), "{}", log(&mut a));
+    assert!(log(&mut a).ends_with("group click;no click;no exit;group exit;"), "{}", log(&mut a));
 }
 
 /// A form whose opening script runs away has its scripts turned off, and doc_info says so.

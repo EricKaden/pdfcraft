@@ -154,7 +154,7 @@ fn xfa_check_box_and_radio_clicks_run_their_click_scripts_in_the_app() {
     h.run_steps(1);
     h.drop_at(p);
     h.run_steps(4);
-    assert!(log(&h).ends_with("no click;"), "{}", log(&h));
+    assert!(log(&h).ends_with("group click;no click;no exit;group exit;"), "{}", log(&h));
 }
 
 /// Clicking an XFA button in the app runs its click script: one adds a row, another shows its

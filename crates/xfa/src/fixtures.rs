@@ -253,8 +253,11 @@ pub fn toggle_template() -> String {
    <event activity="change"><script contentType="{js}">{}</script></event>
    <event activity="click"><script contentType="{js}">{} if (this.rawValue == 1) {{ xfa.host.messageBox("Agreed"); xfa.host.setFocus("note"); }}</script></event></field>
   <exclGroup name="answer" layout="lr-tb">
-   <field name="yes" w="1in" h="0.3in"><ui><checkButton shape="round"/></ui><items><text>Y</text></items><event activity="click"><script contentType="{js}">{}</script></event></field>
-   <field name="no" w="1in" h="0.3in"><ui><checkButton shape="round"/></ui><items><text>N</text></items><event activity="click"><script contentType="{js}">{}</script></event></field>
+   <field name="yes" w="1in" h="0.3in"><ui><checkButton shape="round"/></ui><items><text>Y</text></items><event activity="change"><script contentType="{js}">{}</script></event><event activity="click"><script contentType="{js}">{}</script></event><event activity="exit"><script contentType="{js}">{}</script></event></field>
+   <field name="no" w="1in" h="0.3in"><ui><checkButton shape="round"/></ui><items><text>N</text></items><event activity="change"><script contentType="{js}">{}</script></event><event activity="click"><script contentType="{js}">{}</script></event><event activity="exit"><script contentType="{js}">{}</script></event></field>
+   <event activity="change"><script contentType="{js}">{}</script></event>
+   <event activity="click"><script contentType="{js}">{}</script></event>
+   <event activity="exit"><script contentType="{js}">{}</script></event>
   </exclGroup>
   <field name="note" w="3in" h="0.3in"><ui><textEdit/></ui><event activity="click"><script contentType="{js}">{}</script></event></field>
   <field name="log" w="4in" h="0.3in" access="protected"><ui><textEdit/></ui></field>
@@ -265,8 +268,15 @@ pub fn toggle_template() -> String {
 "##,
         add(r#""change " + this.rawValue"#),
         add(r#""click " + this.rawValue"#),
+        add(r#""yes change""#),
         add(r#""yes click""#),
+        add(r#""yes exit""#),
+        add(r#""no change""#),
         add(r#""no click""#),
+        add(r#""no exit""#),
+        add(r#""group change " + this.rawValue"#),
+        add(r#""group click""#),
+        add(r#""group exit""#),
         add(r#""note click""#),
     )
 }

@@ -5609,9 +5609,10 @@ fn xfa_data_import_on_a_static_form_replaces_every_value_and_pictures_reach_its_
     assert!(xml.contains("<name>Bob</name>") && !xml.contains("<agree>1</agree>"), "{xml}");
 }
 
-/// A click on an XFA check box or radio button runs the field's change scripts, then the click
-/// scripts of what was clicked, which read the new value, show messages and may ask for the focus;
-/// all as one undo step. A text field's click script doesn't run when its value changes.
+/// A click on an XFA check box or radio button runs its change scripts, then its click scripts,
+/// which read the new value, show messages and may ask for the focus; a radio group's run before
+/// those of the button now on. All as one undo step. A text field's click script doesn't run when
+/// its value changes.
 #[test]
 fn xfa_check_box_and_radio_button_clicks_run_their_click_scripts() {
     let bytes = Arc::new(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::toggle_template()));
@@ -5629,13 +5630,14 @@ fn xfa_check_box_and_radio_button_clicks_run_their_click_scripts() {
     // One undo step takes back the click and what its scripts did.
     s.undo(id).unwrap();
     assert_eq!(log(&s), "change 1;click 1;");
-    // A radio button runs its own click script, the one now on.
+    // A radio group runs each activity's scripts, then the button now on runs its own; the
+    // button turned off runs none. Exit scripts follow, the button's first.
     let state = |s: &Session, i: usize| s.get(id).unwrap().form.iter().find(|f| f.name == "answer").and_then(|f| f.widgets.get(i)?.on_state.clone());
     let (yes, no) = (state(&s, 0).expect("yes"), state(&s, 1).expect("no"));
     s.apply(id, Edit::SetFieldValue { name: "answer".into(), value: FieldValue::Radio(Some(no)) }).unwrap();
-    assert!(log(&s).ends_with("no click;"), "{}", log(&s));
+    assert!(log(&s).ends_with("group change N;no change;group click;no click;no exit;group exit;"), "{}", log(&s));
     s.apply(id, Edit::SetFieldValue { name: "answer".into(), value: FieldValue::Radio(Some(yes)) }).unwrap();
-    assert!(log(&s).ends_with("no click;yes click;"), "{}", log(&s));
+    assert!(log(&s).ends_with("no exit;group exit;group change Y;yes change;group click;yes click;yes exit;group exit;"), "{}", log(&s));
     // A text field's value isn't set by a click.
     s.apply(id, Edit::SetFieldValue { name: "note".into(), value: FieldValue::Text("typed".into()) }).unwrap();
     assert!(!log(&s).contains("note click"), "{}", log(&s));
