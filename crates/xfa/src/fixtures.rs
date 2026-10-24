@@ -679,6 +679,26 @@ pub fn signed_shell() -> Vec<u8> {
 /// field `name` lives in the template), signed when `signed`. Its configuration packet says
 /// `<dynamicRender>{render}</dynamicRender>` (none when `render` is empty).
 pub fn saved_with_pages_shell(render: &str, signed: bool) -> Vec<u8> {
+    assemble(saved_with_pages_objects(render, signed))
+}
+
+/// [`saved_with_pages_shell`]`("required", false)` whose signature box sits under `depth` nested
+/// fields of its own (none of them a signature, none with a value).
+pub fn deep_saved_with_pages_shell(depth: usize) -> Vec<u8> {
+    let mut objs = saved_with_pages_objects("required", false);
+    // Object 6, the box, becomes the outermost of the nested fields; the box goes last.
+    let first = objs.len() + 1;
+    let field = |name: usize, kid: usize| format!("<< /T (n{name}) /Kids [{kid} 0 R] >>").into_bytes();
+    let Some(sig) = objs.get_mut(5).map(|o| std::mem::replace(o, field(0, first))) else { return assemble(objs) };
+    for d in 1..depth {
+        objs.push(field(d, first + d));
+    }
+    objs.push(sig);
+    assemble(objs)
+}
+
+/// The objects of [`saved_with_pages_shell`], in order (the signature box is object 6).
+fn saved_with_pages_objects(render: &str, signed: bool) -> Vec<Vec<u8>> {
     let config = if render.is_empty() {
         String::new()
     } else {
@@ -702,7 +722,7 @@ pub fn saved_with_pages_shell(render: &str, signed: bool) -> Vec<u8> {
     );
     let value = if signed { " /V 7 0 R" } else { "" };
     let picture = "BT /F1 12 Tf 72 700 Td (Name: ______) Tj ET";
-    let objs: Vec<Vec<u8>> = vec![
+    vec![
         b"<< /Type /Catalog /Pages 2 0 R /AcroForm << /XFA 5 0 R /Fields [6 0 R] /SigFlags 3 >> >>".to_vec(),
         b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
         b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Annots [6 0 R] >>".to_vec(),
@@ -710,8 +730,7 @@ pub fn saved_with_pages_shell(render: &str, signed: bool) -> Vec<u8> {
         format!("<< /Length {} >>\nstream\n{xdp}\nendstream", xdp.len()).into_bytes(),
         format!("<< /T (form[0].sign[0]) /FT /Sig{value} /Type /Annot /Subtype /Widget /Rect [72 500 288 572] /P 3 0 R >>").into_bytes(),
         b"<< /Type /Sig /Name (A Signer) >>".to_vec(),
-    ];
-    assemble(objs)
+    ]
 }
 
 /// A check box `kind` whose change script, once it is checked, opens the protected check box

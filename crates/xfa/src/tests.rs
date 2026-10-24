@@ -315,6 +315,10 @@ fn a_form_saved_with_its_pages_is_laid_out_when_it_requires_dynamic_rendering() 
     assert!(!is_dynamic(&open("required", true)), "signed: left as saved");
     assert!(!is_dynamic(&open("", false)), "no configuration: the fields it has are the form's");
     assert!(!is_dynamic(&open("forbidden", false)));
+    // A box under nested fields is found; past the 32 levels looked at, the form counts as signed.
+    let deep = |depth: usize| Document::open(Arc::new(crate::fixtures::deep_saved_with_pages_shell(depth))).unwrap();
+    assert!(is_dynamic(&deep(5)), "nested, unsigned");
+    assert!(!is_dynamic(&deep(40)), "too deep to tell: as if signed");
 }
 
 /// Only the configuration packet's `acrobat/acrobat7/dynamicRender` asks for dynamic rendering:

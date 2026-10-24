@@ -129,7 +129,9 @@ pub(crate) fn requires_dynamic_render(xdp: &str) -> bool {
 }
 
 /// Whether the AcroForm holds a signed signature field (`/FT /Sig` with a value), looked for at
-/// most 32 levels deep and among at most 10 000 fields.
+/// most 32 levels deep and among at most 10 000 fields. A form whose fields go past either limit
+/// counts as signed: what wasn't looked at may be, and laying a signed form out would change
+/// what was signed.
 pub(crate) fn has_signature(doc: &Document) -> bool {
     let Some(root) = doc.root() else { return false };
     let catalog = doc.get(root);
@@ -141,7 +143,10 @@ pub(crate) fn has_signature(doc: &Document) -> bool {
     let mut seen = std::collections::HashSet::new();
     let mut budget = 10_000usize;
     while let Some((f, sig_above, depth)) = todo.pop() {
-        if budget == 0 || depth > 32 || f.as_ref().is_some_and(|r| !seen.insert(r)) {
+        if budget == 0 || depth > 32 {
+            return true;
+        }
+        if f.as_ref().is_some_and(|r| !seen.insert(r)) {
             continue;
         }
         budget -= 1;
