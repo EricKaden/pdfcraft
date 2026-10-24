@@ -5696,6 +5696,8 @@ fn drawing_comments_through_tools() {
     assert!(matches!(png[0], Content::Png { .. }));
 }
 
+/// A visible signature drawn from an image, typed text or strokes through sign_document; bad
+/// graphics are refused before anything is written.
 #[test]
 fn signing_with_an_image_typed_or_drawn_graphic_through_tools() {
     let dir = workdir("signing-graphic");
@@ -5765,6 +5767,55 @@ fn signing_with_an_image_typed_or_drawn_graphic_through_tools() {
     assert!(inked(60, 110), "the strokes are drawn");
 }
 
+/// Signing a dynamic form's signature box through sign_document runs its XFA preSign scripts first,
+/// so what they change is signed, and its postSign scripts after, left as unsaved changes; the
+/// result says so and carries their messages. A box without such scripts reports none.
+#[test]
+fn signing_an_xfa_box_runs_its_signing_scripts_through_tools() {
+    let dir = workdir("xfa-sign-events");
+    std::fs::write(dir.join("form.pdf"), pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::signing_events_template())).unwrap();
+    let mut a = auto(&dir);
+    ok(&mut a, "sign_id_create", json!({ "name": "Ada Lovelace", "key": "p256", "password": "secret12", "path": "ada.p12" }));
+    let doc = ok(&mut a, "doc_open", json!({ "path": "form.pdf" }))["doc"].as_u64().unwrap();
+    let fields = ok(&mut a, "form_fields", json!({ "doc": doc }));
+    let name = |n: &str| {
+        fields["fields"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|f| f["name"].as_str())
+            .find(|f| *f == n || f.ends_with(&format!(".{n}[0]")))
+            .unwrap()
+            .to_string()
+    };
+    let r = ok(&mut a, "sign_document", json!({ "doc": doc, "id": "ada.p12", "password": "secret12", "field": name("sign"), "out": "signed.pdf" }));
+    let scripts = &r["form_scripts"];
+    assert_eq!((scripts["before_signing"].as_bool(), scripts["after_signing"].as_bool()), (Some(true), Some(true)), "{r}");
+    assert_eq!(scripts["alerts"], json!(["Signing notice"]), "{r}");
+    assert_eq!(scripts["unsaved_changes"], json!(true), "the postSign change isn't in the signed file: {r}");
+    // The signed file holds what the preSign script did, not what the postSign one did.
+    let signed = ok(&mut a, "doc_open", json!({ "path": "signed.pdf" }))["doc"].as_u64().unwrap();
+    let values = ok(&mut a, "form_fields", json!({ "doc": signed }));
+    let value = |n: &str| {
+        values["fields"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|f| f["name"].as_str().is_some_and(|f| f == n || f.ends_with(&format!(".{n}[0]"))))
+            .map(|f| f["value"].clone())
+    };
+    assert_eq!(value("when"), Some(json!("signed")), "{values}");
+    assert_eq!(value("after"), Some(json!(null)), "{values}");
+    let list = ok(&mut a, "sign_list", json!({ "doc": signed }));
+    assert!(list["signatures"].as_array().unwrap().iter().any(|s| s["signed"] == true && s["status"] == "unknown"), "intact: {list}");
+    // A box without signing scripts: nothing reported.
+    let r = ok(&mut a, "sign_document", json!({ "doc": signed, "id": "ada.p12", "password": "secret12", "field": name("plain"), "out": "both.pdf" }));
+    assert!(r.get("form_scripts").is_none(), "{r}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Digital IDs are created and opened, documents signed with them and their signatures validated,
+/// all through the tools.
 #[test]
 fn digital_ids_signing_and_validation_through_tools() {
     let dir = workdir("signing");

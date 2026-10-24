@@ -2,6 +2,7 @@
 //! document, and manage trusted certificates. Rectangles are points from the top-left of the
 //! displayed page.
 
+use pdfcraft_engine::js::SignEvent;
 use pdfcraft_engine::sign::{self, Certificate, DigitalId, Modification, Name, PrivateKey};
 use pdfcraft_engine::{SignOptions, SignatureInfo, SignatureStatus};
 use serde_json::{Value, json};
@@ -196,6 +197,8 @@ impl Automation {
         })
     }
 
+    /// `sign_document`: sign the document with a digital ID into `out`, visibly (in a field or a
+    /// rectangle) or not, running a dynamic form's signing scripts around it.
     pub(crate) fn sign_document(&mut self, a: &Args) -> Result<Value> {
         let id = self.open_id(a)?;
         let doc = self.doc(a)?;
@@ -245,6 +248,12 @@ impl Automation {
             Some(v) => labels_arg(v)?,
         };
         let out = self.resolve(a.str("out")?, true)?;
+        // A dynamic form's preSign scripts run first, so what they change is signed with it.
+        let signing = field.clone();
+        let before = match &signing {
+            Some(f) => self.session.run_sign_event(doc_id, f, SignEvent::Before).map_err(failed)?,
+            None => false,
+        };
         let opts = SignOptions {
             field,
             page,
@@ -262,13 +271,40 @@ impl Automation {
             // A graphic the signer refuses is the caller's to fix.
             pdfcraft_engine::EditError::Sign(m) if m.starts_with("the signature graphic") => bad(m),
             e => failed(e),
-        })?;
+        });
+        let signed = match signed {
+            Ok(s) => s,
+            Err(e) => {
+                // Not signed: what the preSign scripts did is taken back.
+                if before {
+                    let _ = self.session.undo(doc_id);
+                    let _ = self.session.take_js_output(doc_id);
+                }
+                return Err(e);
+            }
+        };
         write_atomic(&out, &signed)?;
         let path = out.to_string_lossy().into_owned();
         self.session.mark_signed(doc_id, signed.clone(), Some(path.clone())).map_err(failed)?;
+        // Then its postSign scripts; what they change is a change after signing, not saved yet.
+        let after = match &signing {
+            Some(f) => self.session.run_sign_event(doc_id, f, SignEvent::After).map_err(failed)?,
+            None => false,
+        };
+        let scripts = self.session.take_js_output(doc_id);
         let doc = self.doc(a)?;
         let newest = doc.signatures.iter().filter(|s| s.signed).max_by_key(|s| s.revision).cloned();
-        Ok(json!({ "path": path, "bytes": signed.len(), "signature": newest.map(|s| self.sig_json(a, &s)).transpose()? }))
+        let mut result = json!({ "path": path, "bytes": signed.len(), "signature": newest.map(|s| self.sig_json(a, &s)).transpose()? });
+        if before || after {
+            result["form_scripts"] = json!({
+                "before_signing": before,
+                "after_signing": after,
+                "alerts": scripts.alerts,
+                "errors": scripts.errors,
+                "unsaved_changes": self.doc(a)?.dirty,
+            });
+        }
+        Ok(result)
     }
 
     /// `{"image": path}` (PNG or JPEG), `{"text": name}` (typed in the script font) or

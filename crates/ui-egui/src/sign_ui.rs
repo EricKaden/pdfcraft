@@ -459,12 +459,41 @@ impl PdfCraftApp {
             if !app.commit_typing_in(doc_id) {
                 return Err(String::new());
             }
-            let signed = app.session.sign(doc_id, &id, opts).map_err(|e| e.to_string())?;
+            // A dynamic form's preSign scripts run first, so what they change is signed with it
+            // (DA 31's date the signature and lock the date). What they say shows once signing is
+            // done, so the notice that it was saved doesn't take the place of the form's own.
+            let field = opts.field.clone();
+            let before = match &field {
+                Some(f) => app.session.run_sign_event(doc_id, f, pdfcraft_engine::js::SignEvent::Before).map_err(|e| e.to_string())?,
+                None => false,
+            };
+            let mut said = app.session.take_js_output(doc_id);
+            let signed = match app.session.sign(doc_id, &id, opts) {
+                Ok(s) => s,
+                Err(e) => {
+                    // Not signed: what the preSign scripts did is taken back.
+                    if before {
+                        let _ = app.session.undo(doc_id);
+                    }
+                    app.js_console.log.extend(said.console);
+                    return Err(e.to_string());
+                }
+            };
             crate::editing::write_atomically(&path.to_string_lossy(), signed.as_slice()).map_err(|e| format!("Could not save: {e}"))?;
             // Our own write is not a change on disk to reload (#431).
             #[cfg(not(target_arch = "wasm32"))]
             app.watch.known_now(doc_id, &path.to_string_lossy());
             app.session.mark_signed(doc_id, signed, Some(path.to_string_lossy().into_owned())).map_err(|e| e.to_string())?;
+            // Then its postSign scripts; what they change is a change after signing, to save.
+            if let Some(f) = &field {
+                app.session.run_sign_event(doc_id, f, pdfcraft_engine::js::SignEvent::After).map_err(|e| e.to_string())?;
+                let after = app.session.take_js_output(doc_id);
+                said.alerts.extend(after.alerts);
+                said.console.extend(after.console);
+                said.requests.extend(after.requests);
+                said.errors.extend(after.errors);
+                said.doc_errors.extend(after.doc_errors);
+            }
             #[cfg(target_os = "macos")]
             crate::macos_association::repair(&path);
             app.sign_graphic = choice;
@@ -473,6 +502,7 @@ impl PdfCraftApp {
             }
             app.right = Some(crate::RightPanel::Signatures);
             app.notify_fmt("Signed and saved to {path}", &[("path", &path.display().to_string())]);
+            app.handle_js(doc_id, said);
             Ok(())
         };
         match self.save_override.clone() {

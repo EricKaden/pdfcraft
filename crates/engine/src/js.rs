@@ -245,6 +245,25 @@ impl crate::Document {
     }
 }
 
+/// When a signature field's XFA signing scripts run ([`Session::run_sign_event`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SignEvent {
+    /// Just before the field is signed (`preSign`): what it changes is signed too.
+    Before,
+    /// Once the field is signed (`postSign`).
+    After,
+}
+
+impl SignEvent {
+    /// The template's name for the event.
+    pub fn activity(self) -> &'static str {
+        match self {
+            SignEvent::Before => "preSign",
+            SignEvent::After => "postSign",
+        }
+    }
+}
+
 impl Session {
     /// Preferences ▸ JavaScript ▸ Enable Acrobat JavaScript (on by default).
     pub fn set_javascript(&mut self, on: bool) {
@@ -258,6 +277,23 @@ impl Session {
     /// What scripts printed or asked for since the last call (alerts, console, print, …).
     pub fn take_js_output(&mut self, id: DocId) -> JsOutput {
         self.docs.iter_mut().find(|d| d.id == id).map(|d| std::mem::take(&mut d.js_output)).unwrap_or_default()
+    }
+
+    /// Run signature field `field`'s XFA signing scripts for `event` in document `id`: `preSign`
+    /// before it is signed, `postSign` after, as one undoable step, as a form's signing events run
+    /// (DA 31's dates the signature and locks the date). `Ok(false)`, with nothing changed, when
+    /// there are none: not a laid-out XFA form, JavaScript off, no such field, or no such script.
+    /// What the scripts said or asked for is in [`Session::take_js_output`].
+    pub fn run_sign_event(&mut self, id: DocId, field: &str, event: SignEvent) -> Result<bool, EditError> {
+        if self.js_off {
+            return Ok(false);
+        }
+        let doc = self.get(id).ok_or(EditError::NoDocument)?;
+        let (Some(tpl), Some(editor)) = (doc.xfa_template.clone(), doc.editor.as_ref()) else { return Ok(false) };
+        let Some(f) = doc.form.iter().find(|f| f.name == field) else { return Ok(false) };
+        let Some(som) = crate::xfa::scripted_som(&editor.cos, &tpl, f, event.activity()) else { return Ok(false) };
+        self.apply(id, Edit::XfaEvent { som, activity: event.activity().into() })?;
+        Ok(true)
     }
 
     /// Run `script` in document `id`, for a button (`target`: the field, event "Mouse Up") or
