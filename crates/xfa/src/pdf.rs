@@ -748,12 +748,14 @@ impl Emitter<'_> {
                     content.extend(format!("/OC /{resource} BDC\n").bytes());
                 }
                 open = group;
+                // A link's pieces join only within one group: what is in another shows elsewhere.
+                last_link = None;
             }
             // A link's pieces join only across text and the underline drawn just before it: a fill,
             // picture, field or any other line (a rule) between them ends the link there.
             let keeps_link = match item {
                 Item::Text(_) => true,
-                Item::Line { from, to, .. } => matches!(page.items.get(i + 1), Some(Item::Text(s))
+                Item::Line { from, to, .. } => matches!(page.items.get(i + 1).map(bare), Some(Item::Text(s))
                     if (from.1 - to.1).abs() < 0.01
                         && (from.0 - s.x).abs() < 0.01
                         && (from.1 - (s.baseline + s.face.size * crate::layout::UNDERLINE_DROP)).abs() < 0.01),
@@ -809,6 +811,12 @@ impl Emitter<'_> {
                     content.extend(literal(&win_ansi(&s.text)));
                     content.extend_from_slice(format!(" Tj{close}\n").as_bytes());
                     if let Some(r) = self.text_link(s, h, page_ref, &mut last_link)? {
+                        // A link works only where its text shows: one in print-only text is
+                        // NoView (32), so it can't be clicked on screen, and one in screen-only
+                        // text doesn't print, as a field's widget there.
+                        if let Some(g) = group {
+                            self.doc.update_dict(r, |d| d.set(b"F".to_vec(), Object::Int(if g == 0 { 0 } else { 4 | 32 })))?;
+                        }
                         annots.push(Object::Ref(r));
                     }
                 }
@@ -918,6 +926,14 @@ impl Emitter<'_> {
         // The text's ascent and descent, as the layout measures a span's extent.
         let rect = pdf_rect(Rect::new(x, s.baseline - s.face.size * 0.8, w, s.face.size), page_height);
         (rect.iter().all(|v| v.is_finite()) && w > 0.0).then(|| (target.to_string(), rect))
+    }
+}
+
+/// `item`, or what it holds when it is shown only on screen or only in print ([`Item::Only`]).
+fn bare(item: &Item) -> &Item {
+    match item {
+        Item::Only { item, .. } => item,
+        other => other,
     }
 }
 

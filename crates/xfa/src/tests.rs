@@ -870,6 +870,48 @@ fn links_to_anything_but_web_and_email_addresses_stay_plain_text() {
     assert!(warned[0].contains("http, https") && warned[0].contains("mailto"), "{warned:?}");
 }
 
+/// A link in text shown only on screen or only in print works only where its text shows: in
+/// print-only text it is NoView (`/F 36`), so it can't be clicked on screen over nothing, and in
+/// screen-only text it doesn't print (`/F 0`). Its pieces still join into one link across a change
+/// of style and the underline drawn with them.
+#[test]
+fn links_in_screen_only_and_print_only_text_work_where_their_text_shows() {
+    let draw = |name: &str, attrs: &str| {
+        format!(
+            r#"<draw name="{name}" w="4in" {attrs}><font typeface="Arial" size="10pt"/><value><exData contentType="text/html"><body xmlns="http://www.w3.org/1999/xhtml"><p style="text-decoration:underline"><a href="https://example.com/{name}">forms@<b>example</b>.com</a></p></body></exData></value></draw>"#
+        )
+    };
+    let xdp = format!(
+        r##"<?xml version="1.0" encoding="UTF-8"?>
+<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/"><template xmlns="http://www.xfa.org/schema/xfa-template/3.3/"><subform name="form" layout="tb">
+ <pageSet><pageArea name="page"><contentArea x="0.5in" y="0.5in" w="7.5in" h="10in"/><medium short="8.5in" long="11in"/></pageArea></pageSet>
+ {}{}{}
+</subform></template></xdp:xdp>"##,
+        draw("everywhere", ""),
+        draw("screen", r#"relevant="-print""#),
+        draw("paper", r#"presence="invisible" relevant="+print""#),
+    );
+    let mut doc = Document::open(Arc::new(shell(&xdp))).unwrap();
+    render_into(&mut doc).unwrap();
+    // Each link annotation's address and flags.
+    let catalog = doc.get(doc.root().unwrap());
+    let pages = doc.resolve(catalog.as_dict().unwrap().get(b"Pages").unwrap());
+    let kids = doc.resolve(pages.as_dict().unwrap().get(b"Kids").unwrap()).as_array().unwrap().clone();
+    let page = doc.resolve(kids.first().unwrap());
+    let annots = doc.resolve(page.as_dict().unwrap().get(b"Annots").unwrap()).as_array().unwrap().clone();
+    let links: Vec<(String, i64)> = annots
+        .iter()
+        .map(|a| doc.resolve(a).as_dict().unwrap().clone())
+        .filter(|d| d.name(b"Subtype") == Some(&b"Link"[..]))
+        .map(|d| {
+            let action = doc.resolve(d.get(b"A").unwrap()).as_dict().unwrap().clone();
+            (String::from_utf8_lossy(&action.get(b"URI").and_then(Object::as_string).unwrap().bytes).into_owned(), d.int(b"F").unwrap())
+        })
+        .collect();
+    let expected = [("https://example.com/everywhere", 4), ("https://example.com/screen", 0), ("https://example.com/paper", 36)];
+    assert_eq!(links, expected.map(|(u, f)| (u.to_string(), f)), "one link each, with flags where its text shows");
+}
+
 #[test]
 fn documents_without_xfa_are_not_touched() {
     let mut doc = Document::new_empty();
