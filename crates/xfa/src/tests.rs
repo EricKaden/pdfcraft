@@ -3009,6 +3009,50 @@ fn a_zero_caption_reserve_sizes_the_caption_as_none_does() {
     assert!((x_of("withZero") - x_of("without")).abs() < 0.01, "as without a reserve: {} {}", x_of("withZero"), x_of("without"));
 }
 
+/// A date field is shown through its display picture and typed in its edit picture's pattern: its
+/// format action takes the display picture's letters (weekday and month names included), its
+/// keystroke action the edit picture's; without a display picture both take the edit pattern.
+#[test]
+fn date_fields_are_shown_through_their_display_picture() {
+    let xdp = r##"<?xml version="1.0" encoding="UTF-8"?>
+<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/">
+<template xmlns="http://www.xfa.org/schema/xfa-template/3.3/">
+<subform name="form" layout="tb">
+ <pageSet><pageArea name="page"><contentArea x="0.5in" y="0.5in" w="7.5in" h="10in"/><medium short="8.5in" long="11in"/></pageArea></pageSet>
+ <field name="plain" w="2in" h="0.3in"><ui><dateTimeEdit/></ui><value><date/></value><format><picture>date{YYYYMMDD}</picture></format></field>
+ <field name="long" w="3in" h="0.3in"><ui><dateTimeEdit/></ui><value><date/></value><format><picture>date{EEEE, MMMM D, YYYY}</picture></format></field>
+ <field name="both" w="2in" h="0.3in"><ui><dateTimeEdit/><picture>date{YYYYMMDD}|date{DDMMMYY}</picture></ui><value><date/></value><format><picture>date{YYYYMMMDD}</picture></format></field>
+ <field name="none" w="2in" h="0.3in"><ui><dateTimeEdit/><picture>date{DD/MM/YYYY}</picture></ui><value><date/></value></field>
+</subform>
+</template>
+</xdp:xdp>
+"##;
+    let form = layout_xml(xdp).unwrap();
+    let w = widgets(&form.pages[0]);
+    let shown = |n: &str| w.iter().find(|w| w.name == n).unwrap().display_date.clone();
+    assert_eq!(shown("plain").as_deref(), Some("yyyymmdd"));
+    assert_eq!(shown("long").as_deref(), Some("dddd, mmmm d, yyyy"));
+    assert_eq!(shown("both").as_deref(), Some("yyyymmmdd"));
+    assert_eq!(shown("none"), None);
+    let mut doc = Document::open(Arc::new(shell(xdp))).unwrap();
+    render_into(&mut doc).unwrap();
+    let fields = pdfcraft_forms_free_fields(&doc);
+    let action = |n: &str, k: &[u8]| {
+        let d = fields.iter().find(|(name, _)| name == n).map(|(_, d)| d.clone()).unwrap();
+        let aa = doc.resolve(d.get(b"AA").unwrap()).as_dict().unwrap().clone();
+        let a = doc.resolve(aa.get(k).unwrap()).as_dict().unwrap().clone();
+        doc.resolve(a.get(b"JS").unwrap()).as_string().unwrap().to_text()
+    };
+    assert_eq!(action("plain", b"F"), r#"AFDate_FormatEx("yyyymmdd");"#);
+    assert_eq!(action("plain", b"K"), r#"AFDate_KeystrokeEx("yyyy-mm-dd");"#, "typed in the default edit pattern");
+    assert_eq!(action("long", b"F"), r#"AFDate_FormatEx("dddd, mmmm d, yyyy");"#);
+    assert_eq!(
+        (action("both", b"F"), action("both", b"K")),
+        (r#"AFDate_FormatEx("yyyymmmdd");"#.to_string(), r#"AFDate_KeystrokeEx("yyyymmdd");"#.to_string())
+    );
+    assert_eq!(action("none", b"F"), r#"AFDate_FormatEx("dd/mm/yyyy");"#);
+}
+
 #[test]
 fn a_signed_signature_box_shows_the_signature_the_file_holds() {
     let mut doc = Document::open(Arc::new(crate::fixtures::signed_shell())).unwrap();

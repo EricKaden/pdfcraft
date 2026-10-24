@@ -399,7 +399,9 @@ impl Emitter<'_> {
                 if let WidgetKind::Date(pattern) = &w.kind {
                     d.set(DATE_KEY.to_vec(), Object::Bool(true));
                     let mut aa = Dict::new();
-                    aa.set(b"F".to_vec(), js_action(&format!("AFDate_FormatEx(\"{pattern}\");")));
+                    // Shown through the display picture, typed in the edit picture's pattern.
+                    let shown = w.display_date.as_deref().unwrap_or(pattern);
+                    aa.set(b"F".to_vec(), js_action(&format!("AFDate_FormatEx(\"{shown}\");")));
                     aa.set(b"K".to_vec(), js_action(&format!("AFDate_KeystrokeEx(\"{pattern}\");")));
                     d.set(b"AA".to_vec(), Object::Dict(aa));
                 }

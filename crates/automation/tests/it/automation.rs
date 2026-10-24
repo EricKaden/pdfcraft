@@ -6949,6 +6949,36 @@ fn xfa_date_fields_keep_typed_dates_as_another_viewer_does() {
 }
 
 /// A dynamic XFA form opens laid out from its template through the tools, renders, takes values
+/// What an XFA date field shows once a date is typed into it: through its display picture, as
+/// another viewer showed the same typing on a synthetic form (the field's `formattedValue`). A
+/// date is shown in the picture; text that isn't one, as typed.
+#[test]
+fn xfa_date_fields_show_typed_dates_through_their_display_picture() {
+    let dir = workdir("xfa-shown-dates");
+    std::fs::write(dir.join("dates.pdf"), pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::date_pictures_template())).unwrap();
+    let mut a = auto(&dir);
+    // typed, then what display, edit and either show (the field without pictures is left out:
+    // the other viewer shows it in its locale's default, which isn't followed yet).
+    let seen = [
+        ("2016-10-18", ["10/18/2016", "10/18/2016", "20161018"]),
+        ("10/18/2016", ["10/18/2016", "10/18/2016", "10/18/2016"]),
+        ("20161018", ["10/18/2016", "10/18/2016", "20161018"]),
+        ("18OCT16", ["18OCT16", "18OCT16", "20161018"]),
+        ("26 10 18", ["26 10 18", "26 10 18", "26 10 18"]),
+        ("xyz", ["xyz", "xyz", "xyz"]),
+    ];
+    for (typed, shown) in seen {
+        for (field, want) in ["display", "edit", "either"].into_iter().zip(shown) {
+            let doc = ok(&mut a, "doc_open", json!({ "path": "dates.pdf" }))["doc"].as_u64().unwrap();
+            ok(&mut a, "form_fill", json!({ "doc": doc, "values": { field: typed } }));
+            let text = page_text(&mut a, doc).join("\n");
+            assert_eq!(text, want, "{typed} in {field}");
+            ok(&mut a, "doc_close", json!({ "doc": doc, "discard_changes": true }));
+        }
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// and saves them.
 #[test]
 fn dynamic_xfa_forms_open_render_fill_and_save_through_tools() {

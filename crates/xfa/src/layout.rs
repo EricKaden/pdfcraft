@@ -168,6 +168,9 @@ pub struct Widget {
     pub items: Vec<String>,
     /// A text field that doesn't scroll: it takes no more text than it shows (`DoNotScroll`).
     pub no_scroll: bool,
+    /// Date fields: the date letters of the display picture (`<format><picture>`), how the value
+    /// shows when it isn't being typed in. `None`: as the edit pattern writes it.
+    pub display_date: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -2087,6 +2090,7 @@ impl Layouter<'_> {
             action,
             items,
             no_scroll: f.no_scroll,
+            display_date: (f.ui == Ui::DateTimeEdit).then(|| f.display_picture.as_deref().and_then(crate::data::date_letters)).flatten(),
         })))
     }
 }

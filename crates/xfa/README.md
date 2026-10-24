@@ -36,7 +36,7 @@ that warning and keeps the existing layout and accepted widget values.
 - **PDF** (`pdf::write_form`): pages with content streams in the standard 14 fonts (Arial and
   friends → Helvetica, Courier New → Courier, serif faces → Times; nothing is embedded), JPEG
   XObjects, and widgets: text (multi-line, max length, alignment), date (Acrobat's `AFDate`
-  format and keystroke actions from the picture clause), check boxes and radio groups (from
+  format action from the display picture, keystroke action from the edit picture), check boxes and radio groups (from
   `exclGroup`), push buttons with Reset / Print / Save As / URI actions recognised from their
   scripts. Appearance streams are left empty for the forms layer to generate. Each field keeps
   its SOM path in `/PCSom`; the AcroForm gets `/PCXfaLayout` so a saved form is not laid out
