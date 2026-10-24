@@ -965,6 +965,14 @@ pub(crate) fn on_changes(doc: &mut pdfcraft_cos::Document, tpl: &Template, names
     r.finish().map(|_| ())
 }
 
+/// The form was laid out again outside its scripts (a field's text grew or shrank): its
+/// layout:ready scripts run, as after any new layout, and what they change is written.
+pub(crate) fn on_layout(doc: &mut pdfcraft_cos::Document, tpl: &Template, run: &mut XfaRun) -> Result<(), String> {
+    let mut r = Runner::new(doc, tpl, run, OPEN_BUDGET_MS);
+    r.layout_ready()?;
+    r.finish().map(|_| ())
+}
+
 /// The form's data changed outside its scripts (a data file imported, a picture chosen): lay
 /// the form out again from the data, then, when `calculate`, run every calculation.
 pub(crate) fn on_data_replaced(doc: &mut pdfcraft_cos::Document, tpl: &Template, calculate: bool, run: &mut XfaRun) -> Result<(), String> {

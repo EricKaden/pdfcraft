@@ -5741,6 +5741,27 @@ fn filling_growable_xfa_text_reflows_and_undo_restores_the_layout() {
     }
 }
 
+/// Typing text that makes a growable field take another page lays the form out again, and its
+/// layout:ready scripts run again, reading the new page count.
+#[test]
+fn layout_ready_scripts_run_again_after_text_grows_the_form() {
+    let template = pdfcraft_xfa::fixtures::growable_text_template(false).replacen(
+        "<pageSet>",
+        r#"<event activity="ready" ref="$layout"><script contentType="application/x-javascript">xfa.form.form.pages.rawValue = String(xfa.layout.pageCount());</script></event><field name="pages" w="1in" h="0.3in"><ui><textEdit/></ui></field><pageSet>"#,
+        1,
+    );
+    let text: String = (0..150).map(|i| format!("Row{i:03} {}sample\n", "sample ".repeat(8))).collect();
+    let mut s = Session::new();
+    let id = s.open("growing.pdf", None, Arc::new(pdfcraft_xfa::fixtures::shell(&template)), None).unwrap();
+    let pages = |s: &Session| s.get(id).unwrap().form.iter().find(|f| f.name == "pages").map(|f| f.value.clone()).unwrap_or_default();
+    let before = s.get(id).unwrap().info.pages.len();
+    assert_eq!(pages(&s), vec![before.to_string()]);
+    s.apply(id, Edit::SetFieldValue { name: "ACTIVIDADES".into(), value: FieldValue::Text(text) }).unwrap();
+    let after = s.get(id).unwrap().info.pages.len();
+    assert_eq!(after, before + 1, "the text takes another page");
+    assert_eq!(pages(&s), vec![after.to_string()], "layout:ready read the new page count");
+}
+
 #[test]
 fn xfa_text_growth_refreshes_widget_geometry_but_fixed_height_fields_keep_their_widgets() {
     for fixed in [false, true] {

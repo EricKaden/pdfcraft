@@ -4124,6 +4124,23 @@ impl Session {
                     // Layout replaces pages and widgets, even if the page count is unchanged.
                     // Undo/redo must rebuild these too instead of refreshing only field values.
                     scope = Scope::Full;
+                    // A new layout: the form's layout:ready scripts run again, reading its page
+                    // count, as after a layout its scripts asked for.
+                    if let Some(tpl) = cx.xfa.clone() {
+                        let highlight = cx.highlight();
+                        let page_count = pdfcraft_organize::page_count(&next).unwrap_or(cx.pages);
+                        let mut run = xfa::XfaRun { page_count, out: &mut cx.xfa_out, datasets: cx.xfa_datasets, ran_away: false, highlight };
+                        let ran = guard(|| xfa::on_layout(&mut next, &tpl, &mut run))
+                            .unwrap_or_else(|m| Err(format!("the form's scripts failed unexpectedly ({m})")));
+                        cx.xfa_datasets = run.datasets;
+                        cx.xfa_ran_away |= run.ran_away;
+                        cx.pages = run.page_count;
+                        let on = run.highlight;
+                        cx.set_highlight(on);
+                        if let Err(e) = ran {
+                            cx.xfa_out.errors.push(e);
+                        }
+                    }
                 }
             }
         }
