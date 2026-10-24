@@ -541,6 +541,7 @@ impl Emitter<'_> {
                         g.set(b"FT".to_vec(), Object::name("Btn"));
                         g.set(b"Ff".to_vec(), Object::Int((1 << 15) | (1 << 14)));
                         g.set(b"T".to_vec(), Object::String(PdfString::text(group)));
+                        self.taken.insert(group.clone());
                         g.set(b"V".to_vec(), Object::name("Off"));
                         g.set(b"DA".to_vec(), Object::String(PdfString::literal(Self::da(&w.face))));
                         g.set(b"Kids".to_vec(), Object::Array(Vec::new()));
@@ -612,6 +613,8 @@ impl Emitter<'_> {
         }
         if top_level {
             d.set(b"T".to_vec(), Object::String(PdfString::text(&w.name)));
+            // A signature field named by its SOM path must not repeat it.
+            self.taken.insert(w.name.clone());
         }
         let r = self.doc.add(Object::Dict(d));
         if top_level {

@@ -3156,6 +3156,34 @@ fn a_signature_on_a_laid_out_box_survives_a_new_layout() {
 
 /// A signature box the file already holds a signature for shows that signature, the file's own
 /// objects, and is locked; the other box stays unsigned.
+/// A field written under its own name first keeps a signature field named by its SOM path from
+/// repeating that name: with a text field named `form[0]` (as a hostile template may), the box
+/// keeps its own name and no two fields of the AcroForm share one.
+#[test]
+fn a_signature_field_does_not_repeat_a_name_already_written() {
+    let xdp = r##"<?xml version="1.0" encoding="UTF-8"?>
+<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/">
+<template xmlns="http://www.xfa.org/schema/xfa-template/3.3/">
+<subform name="form" layout="tb">
+ <pageSet><pageArea name="page"><contentArea x="0.5in" y="0.5in" w="7.5in" h="10in"/><medium short="8.5in" long="11in"/></pageArea></pageSet>
+ <subform name="body" layout="tb" w="7.5in">
+  <field name="form[0]" w="3in" h="0.3in"><ui><textEdit/></ui></field>
+  <field name="sign" w="3in" h="1in"><ui><signature/></ui></field>
+ </subform>
+</subform>
+</template>
+</xdp:xdp>
+"##;
+    let mut doc = Document::open(Arc::new(shell(xdp))).unwrap();
+    render_into(&mut doc).unwrap();
+    let mut top: Vec<String> = pdfcraft_forms_free_fields(&doc).into_iter().map(|(name, _)| name).collect();
+    assert!(top.iter().any(|n| n == "sign"), "the box keeps its own name: {top:?}");
+    top.sort();
+    let len = top.len();
+    top.dedup();
+    assert_eq!(top.len(), len, "no name twice: {top:?}");
+}
+
 #[test]
 fn a_signed_signature_box_shows_the_signature_the_file_holds() {
     let mut doc = Document::open(Arc::new(crate::fixtures::signed_shell())).unwrap();
