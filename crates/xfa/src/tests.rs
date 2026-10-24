@@ -3147,6 +3147,8 @@ fn a_signature_on_a_laid_out_box_survives_a_new_layout() {
     assert_ne!(new, old, "a field of the new layout");
     let d = doc.get(new).as_dict().unwrap().clone();
     assert_eq!(d.get(b"V").and_then(Object::as_ref), Some(sig), "the same signature");
+    let shown = d.get(b"AP").map(|ap| doc.resolve(ap)).and_then(|ap| ap.as_dict().and_then(|ap| ap.get(b"N").and_then(Object::as_ref)));
+    assert_eq!(shown, Some(picture), "and the same picture");
     assert_eq!(d.int(b"Ff").unwrap_or(0) & 1, 1, "a signed box is not signed again");
     let top = pdfcraft_forms_free_fields(&doc);
     assert_eq!(top.iter().filter(|(name, _)| name == "form[0]").count(), 1, "the old fields are gone");
