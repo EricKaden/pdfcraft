@@ -326,6 +326,7 @@ const WITH_FIELD: &[u8] = b"%PDF-1.7
 trailer << /Root 1 0 R >>
 %%EOF";
 
+/// Clicking an empty signature field opens Sign for that field, and signing fills it.
 #[test]
 fn clicking_an_empty_signature_field_signs_it() {
     let dir = dir().join("field");
@@ -453,6 +454,7 @@ fn cancelling_signing_takes_back_the_presign_scripts_changes() {
     assert!(!named(&h, "when").read_only(), "and unlocked again");
 }
 
+/// A digital signature can show the Fill & Sign signature or an image where the name would be.
 #[test]
 fn the_fill_and_sign_signature_or_an_image_shows_in_a_digital_signature() {
     use pdfcraft_ui_egui::SignGraphic;

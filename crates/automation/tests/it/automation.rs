@@ -5652,6 +5652,7 @@ fn object_has_name(obj: &pdfcraft_cos::Object, name: &[u8]) -> bool {
     }
 }
 
+/// Polygons, polylines and other drawing comments are added and listed through the tools.
 #[test]
 fn drawing_comments_through_tools() {
     let dir = workdir("drawing");

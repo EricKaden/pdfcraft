@@ -5178,6 +5178,8 @@ fn round_xfa_check_buttons_open_drawn_round() {
     }
 }
 
+/// A dynamic XFA form with usage rights is saved without them once laid out, as the layout voids
+/// them, with a note saying so.
 #[test]
 fn a_dynamic_xfa_form_is_saved_without_the_usage_rights_its_layout_voided() {
     let xdp = pdfcraft_xfa::fixtures::template(3);

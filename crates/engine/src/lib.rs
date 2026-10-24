@@ -691,6 +691,7 @@ impl Document {
         self.undo_label().map(Label::as_str)
     }
 
+    /// What Redo would redo, in English, when there is something to redo.
     pub fn can_redo(&self) -> Option<&str> {
         self.redo_label().map(Label::as_str)
     }

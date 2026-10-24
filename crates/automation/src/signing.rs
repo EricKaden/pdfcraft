@@ -175,6 +175,8 @@ impl Automation {
         Ok(json!({ "path": path.to_string_lossy(), "certificate": cert_json(&id.certificate) }))
     }
 
+    /// The digital ID `id` names: a .p12/.pfx file opened with `password`, or an OS key store
+    /// identity (`keychain:` on macOS, `windows:` on Windows).
     fn open_id(&self, a: &Args) -> Result<DigitalId> {
         // A macOS Keychain identity: "keychain:<fingerprint>" or "keychain:<common name>".
         if let Some(r) = a.str("id")?.strip_prefix("keychain:") {
