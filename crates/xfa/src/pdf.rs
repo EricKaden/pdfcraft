@@ -21,6 +21,9 @@ pub const LAYOUT_KEY: &[u8] = b"PCXfaLayout";
 /// PDF action (the script is XFA's, not Acrobat JavaScript); PdfCraft runs the script by the
 /// field's SOM path.
 pub const CLICK_KEY: &[u8] = b"PCXfaClick";
+/// Private key on generated date fields: text the date pattern doesn't read is kept, and shown,
+/// as typed, as an XFA form keeps it (the forms layer reads this key).
+pub const DATE_KEY: &[u8] = b"PCXfaDate";
 
 /// Width and height of a JPEG from its first frame header (SOF0–SOF15, not the DNL/JPG/DAC/DHT
 /// markers). `None` for anything else.
@@ -394,6 +397,7 @@ impl Emitter<'_> {
                     d.set(b"DV".to_vec(), Object::String(PdfString::text(v)));
                 }
                 if let WidgetKind::Date(pattern) = &w.kind {
+                    d.set(DATE_KEY.to_vec(), Object::Bool(true));
                     let mut aa = Dict::new();
                     aa.set(b"F".to_vec(), js_action(&format!("AFDate_FormatEx(\"{pattern}\");")));
                     aa.set(b"K".to_vec(), js_action(&format!("AFDate_KeystrokeEx(\"{pattern}\");")));
@@ -1174,7 +1178,7 @@ pub fn strip(doc: &mut Document) -> Result<Stripped, XfaError> {
             out.image_fields += 1;
         }
         let private: Vec<Vec<u8>> =
-            [SOM_KEY, CLICK_KEY, IMAGE_FIELD_KEY, b"PCItems".as_slice()].iter().filter(|k| d.contains(k)).map(|k| k.to_vec()).collect();
+            [SOM_KEY, CLICK_KEY, IMAGE_FIELD_KEY, DATE_KEY, b"PCItems".as_slice()].iter().filter(|k| d.contains(k)).map(|k| k.to_vec()).collect();
         if !private.is_empty() {
             out.field_keys += private.len();
             doc.update_dict(r, |d| {

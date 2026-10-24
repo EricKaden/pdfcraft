@@ -95,6 +95,9 @@ pub struct Actions {
     pub unsupported: Vec<&'static str>,
     /// Those scripts' JavaScript, run through [`crate::Scripts`].
     pub scripts: Scripts,
+    /// A date field PdfCraft laid out for an XFA form (`/PCXfaDate true`): text its format doesn't
+    /// read is kept and shown as typed rather than refused, as an XFA form keeps it.
+    pub xfa_date: bool,
 }
 
 /// Field scripts that aren't AF calls, by event.
@@ -110,6 +113,43 @@ impl Actions {
     pub fn is_empty(&self) -> bool {
         self.format == Format::None && self.validate == Validate::None && self.calculate == Calculate::None
     }
+
+    /// The Keystroke event on commit ([`keystroke`]); an XFA date field keeps text its format
+    /// doesn't read, as typed.
+    pub fn keystroke(&self, field: &str, value: &str) -> Result<String, String> {
+        match keystroke(&self.format, field, value) {
+            Err(_) if self.xfa_date => Ok(value.trim().to_string()),
+            checked => checked,
+        }
+    }
+
+    /// What the Format event shows for `value` ([`format_value`]). An XFA date field shows a date
+    /// only for a value that is one, in its format already or as an ISO date (`2026-10-18` or
+    /// `20261018`); anything else, which its format would read loosely, shows as typed.
+    pub fn format_value(&self, value: &str) -> String {
+        match &self.format {
+            Format::Date(fmt) if self.xfa_date => {
+                let t = value.trim();
+                let in_format = parse_date(t, fmt).is_some_and(|dt| format_date(dt, fmt).eq_ignore_ascii_case(t));
+                match iso_date(t) {
+                    Some(dt) if !in_format => format_date(dt, fmt),
+                    _ => value.to_string(),
+                }
+            }
+            f => format_value(f, value),
+        }
+    }
+}
+
+/// `text` as an ISO 8601 calendar date, `yyyy-mm-dd` or `yyyymmdd` (digits only, a real day).
+fn iso_date(text: &str) -> Option<DateTime> {
+    let b = text.as_bytes();
+    let fmt = match b.len() {
+        10 if b.iter().enumerate().all(|(i, c)| if i == 4 || i == 7 { *c == b'-' } else { c.is_ascii_digit() }) => "yyyy-mm-dd",
+        8 if b.iter().all(u8::is_ascii_digit) => "yyyymmdd",
+        _ => return None,
+    };
+    parse_date(text, fmt).filter(|dt| format_date(*dt, fmt) == text)
 }
 
 // ── parsing scripts ─────────────────────────────────────────────────────────────────────────
@@ -1751,6 +1791,34 @@ mod tests {
         // Blank input clears a formatted field (#1323); without a format it is text like any other.
         assert_eq!(keystroke(&n(2, 0, 0, "$", true), "Total", " \t"), Ok(String::new()));
         assert_eq!(keystroke(&Format::None, "Name", " \t"), Ok(" \t".into()));
+    }
+
+    /// A date field laid out for an XFA form keeps text its pattern doesn't read, as typed, and
+    /// shows a date only for a value that is one: in the pattern already, or an ISO date. Another
+    /// viewer keeps and shows such text the same way on a synthetic form; an ordinary date field
+    /// still refuses it.
+    #[test]
+    fn xfa_date_fields_keep_and_show_what_their_pattern_does_not_read() {
+        let xfa = |fmt: &str| Actions { format: Format::Date(fmt.into()), xfa_date: true, ..Actions::default() };
+        let plain = |fmt: &str| Actions { format: Format::Date(fmt.into()), ..Actions::default() };
+        for (fmt, typed) in [("yyyy-mm-dd", "10/18/2016"), ("mm/dd/yyyy", "xyz"), ("yyyymmdd", "10/18/2016")] {
+            assert_eq!(xfa(fmt).keystroke("Date", typed), Ok(typed.to_string()), "{typed} in {fmt}");
+            assert!(plain(fmt).keystroke("Date", typed).is_err(), "an ordinary date field refuses {typed}");
+        }
+        // Shown: in the pattern, as it is; an ISO date, in the pattern; anything else as typed,
+        // where an ordinary field's looser reading would show a date the value doesn't hold.
+        let ymd = xfa("yyyymmdd");
+        assert_eq!(ymd.format_value("20161018"), "20161018");
+        assert_eq!(ymd.format_value("2016-10-18"), "20161018");
+        assert_eq!(ymd.format_value("26 10 18"), "26 10 18");
+        assert_ne!(plain("yyyymmdd").format_value("26 10 18"), "26 10 18", "read loosely as a date");
+        let mdy = xfa("mm/dd/yyyy");
+        assert_eq!(mdy.format_value("2016-10-18"), "10/18/2016");
+        assert_eq!(mdy.format_value("20161018"), "10/18/2016");
+        assert_eq!(mdy.format_value("10/18/2016"), "10/18/2016");
+        assert_eq!(mdy.format_value("xyz"), "xyz");
+        assert_eq!(mdy.format_value("2016-02-30"), "2016-02-30", "not a real day: as typed");
+        assert_eq!(xfa("ddmmmyy").format_value("18OCT16"), "18OCT16", "in the pattern, its case kept");
     }
 
     #[test]

@@ -405,7 +405,11 @@ fn actions_of(doc: &Document, d: &Dict, widgets: &[ObjRef], scripts: &mut Decode
             .and_then(|w| w.as_dict().and_then(|wd| wd.get(b"AA").map(|a| doc.resolve(a))))
             .and_then(|a| a.as_dict().cloned())
     });
-    let mut out = af::Actions::default();
+    let mut out = af::Actions {
+        // A date field the XFA layout generated: what its format doesn't read is kept as typed.
+        xfa_date: matches!(d.get(b"PCXfaDate").map(|o| doc.resolve(o)).as_deref(), Some(Object::Bool(true))),
+        ..af::Actions::default()
+    };
     let Some(aa) = aa else { return out };
     let mut js = |k: &[u8]| aa.get(k).and_then(|a| script(doc, a, scripts));
     if let Some(f) = js(b"F") {
@@ -1045,6 +1049,8 @@ fn invalid<T>(m: impl Into<String>) -> Result<T, FormError> {
     Err(FormError::Invalid(m.into()))
 }
 
+/// Put `value` into field `f` as its kind takes one (a text value through the field's Keystroke
+/// and Validate events and its scripts first), and redraw the field.
 fn write_value(doc: &mut Document, f: &Field, value: &FieldValue, scripts: &mut dyn Scripts) -> Result<(), FormError> {
     match (f.kind, value) {
         (FieldKind::Text, FieldValue::Text(t)) => {
@@ -1054,7 +1060,7 @@ fn write_value(doc: &mut Document, f: &Field, value: &FieldValue, scripts: &mut 
                 return invalid(format!("{:?} takes at most {max} characters", f.name));
             }
             // Keystroke (on commit) and Validate, as Acrobat runs them before accepting a value.
-            let t = &af::keystroke(&f.actions.format, &f.name, t).map_err(FormError::Format)?;
+            let t = &f.actions.keystroke(&f.name, t).map_err(FormError::Format)?;
             af::validate(&f.actions.validate, t).map_err(FormError::Invalid)?;
             let t = &scripting::accept(doc, f, t, scripts)?;
             doc.update_dict(f.obj, |d| {
