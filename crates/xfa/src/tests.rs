@@ -3596,6 +3596,14 @@ fn a_layout_ready_event_is_told_apart_from_form_ready() {
     assert!(!js("this.rawValue = mylayout.page(this);"));
     assert!(js("this.rawValue = xfa.layout.page (this);"));
     assert!(js("this.rawValue = xfa . layout . absPage(this);"));
+    // An assignment over several lines is read whole; the next statement is not part of it.
+    assert!(js("this.rawValue =\n    xfa.layout.page(this);"));
+    assert!(js("this.rawValue = 'Page ' +\n  xfa.layout.page(this)"));
+    assert!(!js("this.rawValue = 'x'\nother.rawValue = xfa.layout.page(this)"), "the next line is another statement");
+    assert!(js("if (true) { this.rawValue = xfa.layout.page(this) }"));
+    assert!(!js("that.this.rawValue = xfa.layout.page(this);"), "not the script's own field");
+    assert!(formcalc("$ =\n xfa.layout.page($)"));
+    assert!(!formcalc("$record.x = xfa.layout.page($)"), "not the field");
 }
 
 /// `typed_date` rewrites a date typed by another of a field's edit-picture patterns in the first

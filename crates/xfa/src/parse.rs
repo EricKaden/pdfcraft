@@ -705,20 +705,53 @@ fn own_page_role(script: &str, formcalc: bool) -> Option<PageRole> {
     }
 }
 
-/// What the statements of `code` assign to the script's own field: the text after `=` of each
-/// `this.rawValue = …` (in FormCalc also `$.rawValue = …` and `$ = …`). Statements end at a line
-/// break, and in JavaScript at `;` too.
+/// What the statements of `code` assign to the script's own field: the expression after `=` of
+/// each `this.rawValue = …` (in FormCalc also `$.rawValue = …` and `$ = …`) that starts a
+/// statement. The expression runs to a `;` (JavaScript) or to the end of a line that completes it:
+/// brackets closed and not ending in an operator, so `this.rawValue =` with its value on the next
+/// line, or a sum broken over lines, is read whole.
 fn own_assignments(code: &str, formcalc: bool) -> Vec<&str> {
     let targets: &[&str] = if formcalc { &["this.rawValue", "$.rawValue", "$"] } else { &["this.rawValue"] };
-    code.split(|c| c == '\n' || (!formcalc && c == ';'))
-        .filter_map(|statement| {
-            let statement = statement.trim();
-            targets.iter().find_map(|t| {
-                let rhs = statement.strip_prefix(t)?.trim_start().strip_prefix('=')?;
-                (!rhs.starts_with('=')).then_some(rhs)
-            })
-        })
-        .collect()
+    let ident = |c: char| c.is_alphanumeric() || c == '_' || c == '$' || c == '.';
+    let mut out = Vec::new();
+    for t in targets {
+        for (i, _) in code.match_indices(t) {
+            // A statement's start: nothing before it on its line but spaces, or a `;`, `{` or `}`.
+            let before = code.get(..i).unwrap_or_default().trim_end_matches([' ', '\t']);
+            if !(before.is_empty() || before.ends_with(['\n', '\r', ';', '{', '}'])) {
+                continue;
+            }
+            let Some(rest) = code.get(i + t.len()..) else { continue };
+            // `$` is the whole name (not `$record`, not `$.rawValue`, a target of its own).
+            if rest.chars().next().is_some_and(ident) {
+                continue;
+            }
+            let Some(rhs) = rest.trim_start().strip_prefix('=').filter(|r| !r.starts_with('=')) else { continue };
+            out.push(expression(rhs, formcalc));
+        }
+    }
+    out
+}
+
+/// The expression at the start of `rhs` (what follows an `=`): to a `;` outside brackets in
+/// JavaScript, or to a line break once something is written, the brackets are closed and the
+/// line doesn't end in an operator that continues it.
+fn expression(rhs: &str, formcalc: bool) -> &str {
+    let mut depth = 0i32;
+    let mut last: Option<char> = None;
+    for (j, c) in rhs.char_indices() {
+        match c {
+            '(' | '[' | '{' => depth = depth.saturating_add(1),
+            ')' | ']' | '}' => depth = depth.saturating_sub(1),
+            ';' if !formcalc && depth <= 0 => return rhs.get(..j).unwrap_or(rhs),
+            '\n' if depth <= 0 && last.is_some_and(|l| !"+-*/%=,(&|?:.<>!".contains(l)) => return rhs.get(..j).unwrap_or(rhs),
+            _ => {}
+        }
+        if !c.is_whitespace() {
+            last = Some(c);
+        }
+    }
+    rhs
 }
 
 /// Whether `code` calls `layout.<method>(…)`: the method's whole name after `layout.` (spaces
@@ -738,10 +771,10 @@ fn calls_layout(code: &str, method: &str) -> bool {
     })
 }
 
-/// `script` with its comments and string literals blanked out: `//` and `/* */` comments and
-/// `'…'`, `"…"` and `` `…` `` strings (with `\` escapes) in JavaScript; `;` and `//` comments and
-/// `"…"` strings (a doubled `""` inside) in FormCalc. Line breaks stay. An unclosed comment or
-/// string runs to the end.
+/// `script` with its comments blanked out and each string literal left as a bare `"`: `//` and
+/// `/* */` comments and `'…'`, `"…"` and `` `…` `` strings (with `\` escapes) in JavaScript; `;`
+/// and `//` comments and `"…"` strings (a doubled `""` inside) in FormCalc. Line breaks stay. An
+/// unclosed comment or string runs to the end.
 fn code_of(script: &str, formcalc: bool) -> String {
     let mut out = String::with_capacity(script.len());
     let mut chars = script.chars().peekable();
@@ -776,7 +809,8 @@ fn code_of(script: &str, formcalc: bool) -> String {
                     }
                 }
             }
-            out.push(' ');
+            // A mark where the string was: the expression it ends is still seen to end there.
+            out.push('"');
         } else {
             out.push(c);
         }
