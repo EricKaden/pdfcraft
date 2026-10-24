@@ -2983,6 +2983,32 @@ fn a_check_box_caption_without_a_reserve_takes_the_rest_of_the_field() {
     assert!(span("Inline").is_none(), "an inline caption beside a check box is not drawn");
 }
 
+/// A caption reserve of zero sizes the caption to its content, as no reserve does: beside a check
+/// box it takes the rest of the field, and before a text field it is as wide as its text.
+#[test]
+fn a_zero_caption_reserve_sizes_the_caption_as_none_does() {
+    let cap = |reserve: &str| {
+        format!(r#"<caption placement="right"{reserve}><font typeface="Arial" size="9pt"/><value><text>Right</text></value></caption>"#)
+    };
+    let text = |name: &str, y: &str, reserve: &str| {
+        format!(
+            r#"<field name="{name}" x="0in" y="{y}" w="3in" h="0.3in"><ui><textEdit/></ui><font typeface="Arial" size="9pt"/><caption placement="left"{reserve}><font typeface="Arial" size="9pt"/><value><text>Name</text></value></caption></field>"#
+        )
+    };
+    let body = format!(
+        r#"<subform name="body" layout="position" w="7.5in" h="9in">{}{}{}</subform>"#,
+        placed_check("zero", 0.0, 0.0, "1.5in", Some("0.25in"), "", &cap(r#" reserve="0""#)),
+        text("withZero", "1in", r#" reserve="0in""#),
+        text("without", "2in", ""),
+    );
+    let form = layout_xml(&one_area_form(r#"layout="tb""#, &body)).unwrap();
+    let right = form.pages[0].items.iter().find_map(|i| if let Item::Text(s) = i { (s.text == "Right").then_some(s.x) } else { None });
+    assert!(right.is_some_and(|x| (x - 36.0 - 18.0).abs() < 0.01), "the caption starts after the box: {right:?}");
+    let x_of = |name: &str| widgets(&form.pages[0]).iter().find(|w| w.name == name).map(|w| w.rect.x).unwrap();
+    assert!(x_of("withZero") > 36.0 + 1.0, "the caption takes its text's width: {}", x_of("withZero"));
+    assert!((x_of("withZero") - x_of("without")).abs() < 0.01, "as without a reserve: {} {}", x_of("withZero"), x_of("without"));
+}
+
 #[test]
 fn a_signed_signature_box_shows_the_signature_the_file_holds() {
     let mut doc = Document::open(Arc::new(crate::fixtures::signed_shell())).unwrap();
