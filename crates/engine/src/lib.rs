@@ -2687,6 +2687,8 @@ fn run_edit(doc: &mut pdfcraft_cos::Document, edit: &Edit, cx: &mut EditCtx) -> 
             let ran = xfa::on_event(doc, &tpl, som, activity, &mut run);
             cx.xfa_datasets = run.datasets;
             cx.xfa_ran_away |= run.ran_away;
+            // The next edit of a batch reads the highlight this one's scripts set.
+            cx.highlight = run.highlight;
             ran.map_err(EditError::Invalid)?;
         }
         Edit::SetFieldImage { name, image } => {
@@ -3484,6 +3486,8 @@ fn xfa_after_data_change(doc: &mut pdfcraft_cos::Document, cx: &mut EditCtx, cal
             .unwrap_or_else(|m| Err(format!("laying the form out again failed unexpectedly ({m})")));
         cx.xfa_datasets = run.datasets;
         cx.xfa_ran_away |= run.ran_away;
+        // The next edit of a batch reads the highlight this one's scripts set.
+        cx.highlight = run.highlight;
         if let Err(e) = r {
             cx.xfa_out.errors.push(e);
         }
@@ -4071,6 +4075,8 @@ impl Session {
                     .unwrap_or_else(|m| Err(format!("the form's scripts failed unexpectedly ({m})")));
                 cx.xfa_datasets = run.datasets;
                 cx.xfa_ran_away |= run.ran_away;
+                // The next edit of a batch reads the highlight this one's scripts set.
+                cx.highlight = run.highlight;
                 if let Err(e) = ran {
                     cx.xfa_out.errors.push(e);
                 }

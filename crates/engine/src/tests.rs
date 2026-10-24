@@ -8102,6 +8102,35 @@ fn a_forms_layout_ready_scripts_run_once_it_is_laid_out() {
     assert!(s.take_js_output(id).requests.is_empty());
 }
 
+/// In a batch of XFA events, a later event's scripts read the field highlight an earlier one's set:
+/// `on`'s click turns it on, and `look`'s click, in the same batch, records what it reads.
+#[test]
+fn a_later_xfa_event_in_a_batch_reads_the_highlight_an_earlier_one_set() {
+    let script = |js: &str| format!(r#"<event activity="click"><script contentType="application/x-javascript">{js}</script></event>"#);
+    let xdp = format!(
+        r##"<?xml version="1.0" encoding="UTF-8"?>
+<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/">
+<template xmlns="http://www.xfa.org/schema/xfa-template/3.3/">
+<subform name="form" layout="tb">
+ <pageSet><pageArea name="front"><contentArea x="0.5in" y="0.5in" w="7.5in" h="10in"/><medium short="8.5in" long="11in"/></pageArea></pageSet>
+ <field name="on" w="1in" h="0.3in"><ui><button/></ui>{on}</field>
+ <field name="look" w="1in" h="0.3in"><ui><button/></ui>{look}</field>
+ <field name="seen" w="2in" h="0.3in"><ui><textEdit/></ui></field>
+</subform>
+</template>
+</xdp:xdp>
+"##,
+        on = script("app.runtimeHighlight = true;"),
+        look = script("xfa.form.form.seen.rawValue = String(app.runtimeHighlight);"),
+    );
+    let mut s = Session::new();
+    let id = s.open("batch.pdf", None, Arc::new(pdfcraft_xfa::fixtures::shell(&xdp)), None).expect("opens");
+    let click = |som: &str| Edit::XfaEvent { som: som.into(), activity: "click".into() };
+    s.apply(id, Edit::Batch { edits: vec![click("form[0].on[0]"), click("form[0].look[0]")], label: "Click".into() }).expect("clicks");
+    let seen = s.get(id).unwrap().form.iter().find(|f| f.name == "seen").map(|f| f.value.clone()).unwrap_or_default();
+    assert_eq!(seen, vec!["true".to_string()]);
+}
+
 /// Field scripts of one edit read the field highlight an earlier one set: `on`'s calculation turns
 /// it on, and `seen`'s, which runs after it, records what it reads.
 #[test]
