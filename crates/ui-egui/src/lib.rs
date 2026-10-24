@@ -753,6 +753,12 @@ pub struct PdfCraftApp {
     /// The left-out count the toast is saying now ([`Self::next_script_message`]): put back to be
     /// said again if another notice replaces the toast before it has been shown its time.
     pub toast_dropped: u64,
+    /// The notice that a form script failed, waiting for the toast: the latest action's first
+    /// error, clipped ([`Self::note_script_failure`]).
+    pub script_failure: Option<String>,
+    /// The error the toast's failure notice quotes, while it shows one (with a button to the
+    /// JavaScript console): put back to wait if another notice replaces it before its time.
+    pub toast_failure: Option<String>,
     /// Whether the macOS title bar is drawn by us (traffic lights over our tab strip).
     pub integrated_titlebar: bool,
     /// Set when the desktop leaves the window frame to the app (GNOME on Wayland): the tab strip
@@ -1164,6 +1170,8 @@ impl PdfCraftApp {
             script_messages: std::collections::VecDeque::new(),
             script_messages_dropped: 0,
             toast_dropped: 0,
+            script_failure: None,
+            toast_failure: None,
             integrated_titlebar: false,
             window_controls: None,
             system_title_bar: false,
@@ -2330,6 +2338,10 @@ impl PdfCraftApp {
     pub fn notify(&mut self, msg: impl Into<String>) {
         // A left-out count it replaces is said again once the toast is free.
         self.script_messages_dropped = self.script_messages_dropped.saturating_add(std::mem::take(&mut self.toast_dropped));
+        // So is a script failure notice, unless a newer one waits.
+        if let Some(e) = self.toast_failure.take() {
+            self.script_failure.get_or_insert(e);
+        }
         self.toast = Some((msg.into(), 0.0));
         self.toast_script = None;
     }
