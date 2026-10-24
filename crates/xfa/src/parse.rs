@@ -682,13 +682,60 @@ fn parse_node(c: XmlNode, warnings: &mut Vec<String>, depth: usize) -> Option<No
     })
 }
 
-/// Whether a `layout:ready` script uses page numbers (`xfa.layout.page(this)`, `pageCount()`): on a
-/// field, it makes the field one the layout numbers itself. Its code is read (JavaScript, or
-/// FormCalc when `formcalc`), not its comments and strings, so a script that only mentions one of
-/// the names writes to its field as any other does.
+/// Whether a `layout:ready` script numbers its own field: assigns it (`this.rawValue = …`, and in
+/// FormCalc `$ = …` or `$.rawValue = …`) an expression that calls `xfa.layout.page(…)`,
+/// `absPage(…)` or `pageCount()`. Such a field is one the layout numbers itself, page by page.
+/// Its code is read (JavaScript, or FormCalc when `formcalc`), not its comments and strings, and
+/// the calls are matched as whole names, with or without spaces before the parenthesis.
 pub fn numbers_pages(script: &str, formcalc: bool) -> bool {
+    own_page_role(script, formcalc).is_some()
+}
+
+/// The page-number role a `layout:ready` script gives its own field ([`numbers_pages`]): the page
+/// count when what it assigns calls `pageCount()`, else the page number.
+fn own_page_role(script: &str, formcalc: bool) -> Option<PageRole> {
     let code = code_of(script, formcalc);
-    code.contains("pageCount") || code.contains("layout.page(") || code.contains("layout.absPage(")
+    let own = own_assignments(&code, formcalc);
+    if own.iter().any(|rhs| calls_layout(rhs, "pageCount")) {
+        Some(PageRole::Count)
+    } else if own.iter().any(|rhs| calls_layout(rhs, "page") || calls_layout(rhs, "absPage")) {
+        Some(PageRole::Number)
+    } else {
+        None
+    }
+}
+
+/// What the statements of `code` assign to the script's own field: the text after `=` of each
+/// `this.rawValue = …` (in FormCalc also `$.rawValue = …` and `$ = …`). Statements end at a line
+/// break, and in JavaScript at `;` too.
+fn own_assignments(code: &str, formcalc: bool) -> Vec<&str> {
+    let targets: &[&str] = if formcalc { &["this.rawValue", "$.rawValue", "$"] } else { &["this.rawValue"] };
+    code.split(|c| c == '\n' || (!formcalc && c == ';'))
+        .filter_map(|statement| {
+            let statement = statement.trim();
+            targets.iter().find_map(|t| {
+                let rhs = statement.strip_prefix(t)?.trim_start().strip_prefix('=')?;
+                (!rhs.starts_with('=')).then_some(rhs)
+            })
+        })
+        .collect()
+}
+
+/// Whether `code` calls `layout.<method>(…)`: the method's whole name after `layout.` (spaces
+/// allowed around the dot), then `(` after any spaces.
+fn calls_layout(code: &str, method: &str) -> bool {
+    let ident = |c: char| c.is_alphanumeric() || c == '_' || c == '$';
+    code.match_indices(method).any(|(i, _)| {
+        let before = code.get(..i).unwrap_or_default().trim_end();
+        let after = code.get(i + method.len()..).unwrap_or_default();
+        !after.chars().next().is_some_and(ident)
+            && after.trim_start().starts_with('(')
+            && before
+                .strip_suffix('.')
+                .map(str::trim_end)
+                .and_then(|b| b.strip_suffix("layout"))
+                .is_some_and(|rest| !rest.chars().next_back().is_some_and(ident))
+    })
 }
 
 /// `script` with its comments and string literals blanked out: `//` and `/* */` comments and
@@ -739,14 +786,8 @@ fn code_of(script: &str, formcalc: bool) -> String {
 
 /// Which page-number role a field with a layout:ready script plays, if any.
 fn page_role(f: &Field) -> Option<PageRole> {
-    let script = f.scripts.iter().find(|s| s.activity == "ready" || s.activity == "layoutReady")?;
-    if !numbers_pages(&script.text, script.formcalc) {
-        None
-    } else if code_of(&script.text, script.formcalc).contains("pageCount") {
-        Some(PageRole::Count)
-    } else {
-        Some(PageRole::Number)
-    }
+    // Any of its layout:ready scripts, past a form:ready one.
+    f.scripts.iter().filter(|s| s.activity == "layoutReady").find_map(|s| own_page_role(&s.text, s.formcalc))
 }
 
 fn collect_page_roles(nodes: &[Node], out: &mut Vec<(String, PageRole)>, depth: usize) {
