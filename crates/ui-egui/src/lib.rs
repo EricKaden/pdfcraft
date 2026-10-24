@@ -740,6 +740,9 @@ pub struct PdfCraftApp {
     pub script_messages: std::collections::VecDeque<pdfcraft_engine::js::Message>,
     /// Form script messages the waiting queue had no room for, since the toast last said how many.
     pub script_messages_dropped: u64,
+    /// The left-out count the toast is saying now ([`Self::next_script_message`]): put back to be
+    /// said again if another notice replaces the toast before it has been shown its time.
+    pub toast_dropped: u64,
     /// Whether the macOS title bar is drawn by us (traffic lights over our tab strip).
     pub integrated_titlebar: bool,
     /// Set when the desktop leaves the window frame to the app (GNOME on Wayland): the tab strip
@@ -1148,6 +1151,7 @@ impl PdfCraftApp {
             toast_script: None,
             script_messages: std::collections::VecDeque::new(),
             script_messages_dropped: 0,
+            toast_dropped: 0,
             integrated_titlebar: false,
             window_controls: None,
             system_title_bar: false,
@@ -2293,6 +2297,8 @@ impl PdfCraftApp {
     /// Show `msg` in the toast now, in place of whatever it showed. Script messages still waiting
     /// show after it.
     pub fn notify(&mut self, msg: impl Into<String>) {
+        // A left-out count it replaces is said again once the toast is free.
+        self.script_messages_dropped = self.script_messages_dropped.saturating_add(std::mem::take(&mut self.toast_dropped));
         self.toast = Some((msg.into(), 0.0));
         self.toast_script = None;
     }

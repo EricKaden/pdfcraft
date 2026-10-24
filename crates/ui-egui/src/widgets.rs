@@ -390,6 +390,8 @@ pub fn toast(app: &mut PdfCraftApp, ctx: &egui::Context) {
     // A form script message waiting its turn takes the toast once it is free.
     if app.toast.is_none() {
         app.toast_script = None;
+        // A left-out count whose toast was cleared before its time is said again.
+        app.script_messages_dropped = app.script_messages_dropped.saturating_add(std::mem::take(&mut app.toast_dropped));
         app.next_script_message();
     }
     let Some((msg, start)) = app.toast.clone() else { return };
@@ -399,6 +401,8 @@ pub fn toast(app: &mut PdfCraftApp, ctx: &egui::Context) {
     if now - start > 3.5 {
         app.toast = None;
         app.toast_script = None;
+        // Shown its time: a left-out count it said is done.
+        app.toast_dropped = 0;
         if app.next_script_message() {
             ctx.request_repaint();
         }

@@ -131,6 +131,8 @@ impl PdfCraftApp {
                 "{n} more message from the form's scripts was left out.",
                 "{n} more messages from the form's scripts were left out.",
             ));
+            // Kept with the toast until it has been shown its time (the toast's own expiry).
+            self.toast_dropped = n;
             return true;
         };
         self.toast = Some((m.text.clone(), 0.0));

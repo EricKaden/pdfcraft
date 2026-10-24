@@ -137,6 +137,22 @@ fn every_message_a_script_shows_takes_the_toast_in_turn() {
     assert_eq!(shown(&h).as_deref(), Some("5 more messages from the form's scripts were left out."));
     assert_eq!(h.state().toast_script, None, "an app notice, not a script message");
     assert!(!h.state_mut().next_script_message(), "said once");
+    // Another notice replacing it before its time doesn't lose the count: once that notice has
+    // been shown its time, the count is said again, and then, its own time over, not again.
+    h.state_mut().notify("Saved");
+    assert_eq!(shown(&h).as_deref(), Some("Saved"));
+    let left_out = "5 more messages from the form's scripts were left out.";
+    let mut said_again = false;
+    for _ in 0..600 {
+        h.run_steps(1);
+        said_again |= shown(&h).as_deref() == Some(left_out);
+        if said_again && shown(&h).is_none() {
+            break;
+        }
+    }
+    assert!(said_again, "the count is said again after the notice that replaced it");
+    assert_eq!(shown(&h), None, "and once only");
+    assert!(!h.state_mut().next_script_message());
 }
 
 #[test]
