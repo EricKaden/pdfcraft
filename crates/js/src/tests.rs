@@ -1579,6 +1579,16 @@ mod runtime_highlight {
         assert_eq!(o.effects, vec![XfaEffect::Highlight(true)]);
         let o = run_xfa(script, &ev, &XfaDoc { highlight: true, ..Default::default() }, &root, Limits::default());
         assert_eq!((o.result.as_deref(), o.effects.len()), (Some("true,true"), 0), "already on: nothing to ask for");
+        // Past the effect cap the request is dropped, and the script still reads the setting the
+        // viewer has.
+        let full = format!(
+            "for (var i = 0; i < {}; i++) {{ xfa.host.beep(); }} app.runtimeHighlight = true; String(app.runtimeHighlight)",
+            crate::xfa::MAX_EFFECTS
+        );
+        let o = run_xfa(&full, &ev, &XfaDoc::default(), &root, Limits::default());
+        assert_eq!(o.error, None, "{o:?}");
+        assert_eq!(o.result.as_deref(), Some("false"));
+        assert!(!o.effects.contains(&XfaEffect::Highlight(true)));
     }
 }
 

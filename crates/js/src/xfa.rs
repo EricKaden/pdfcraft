@@ -1159,9 +1159,12 @@ fn runtime_highlight(_: &JsValue, _: &[JsValue], ctx: &mut Context) -> JsResult<
 fn set_runtime_highlight(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
     let on = arg(args, 0).to_boolean();
     let mut h = host(ctx)?.borrow_mut();
-    if h.doc.highlight != on {
+    let e = XfaEffect::Highlight(on);
+    // Changed only when the request is kept: past the effect cap the script goes on reading the
+    // setting the viewer has.
+    if h.doc.highlight != on && h.reserve(&e, payload(&e)) {
         h.doc.highlight = on;
-        h.push(XfaEffect::Highlight(on));
+        h.record(e);
     }
     Ok(JsValue::undefined())
 }
