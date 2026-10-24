@@ -6948,7 +6948,6 @@ fn xfa_date_fields_keep_typed_dates_as_another_viewer_does() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// A dynamic XFA form opens laid out from its template through the tools, renders, takes values
 /// What an XFA date field shows once a date is typed into it: through its display picture, as
 /// another viewer showed the same typing on a synthetic form (the field's `formattedValue`). A
 /// date is shown in the picture; text that isn't one, as typed.
@@ -6979,6 +6978,35 @@ fn xfa_date_fields_show_typed_dates_through_their_display_picture() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// An XFA date field whose edit picture differs from its display picture reads a typed date with
+/// the edit picture and shows it with the display picture, as another viewer did for the same
+/// typing on a synthetic form: day first in, month first out. What the edit picture can't read is
+/// kept and shown as typed.
+#[test]
+fn xfa_date_fields_read_typed_dates_through_their_edit_picture() {
+    let dir = workdir("xfa-edit-dates");
+    std::fs::write(dir.join("dates.pdf"), pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::date_pictures_template())).unwrap();
+    let mut a = auto(&dir);
+    // typed, then what the field shows and what the data keeps.
+    let seen = [
+        ("18/10/2016", "10/18/2016", "2016-10-18"),
+        ("10/11/2016", "11/10/2016", "2016-11-10"),
+        ("10/18/2016", "10/18/2016", "10/18/2016"),
+        ("2016-10-18", "10/18/2016", "2016-10-18"),
+    ];
+    for (typed, shown, kept) in seen {
+        let doc = ok(&mut a, "doc_open", json!({ "path": "dates.pdf" }))["doc"].as_u64().unwrap();
+        ok(&mut a, "form_fill", json!({ "doc": doc, "values": { "swapped": typed } }));
+        assert_eq!(page_text(&mut a, doc).join("\n"), shown, "{typed} shown");
+        ok(&mut a, "doc_export_data", json!({ "doc": doc, "path": "data.xml", "what": "fields" }));
+        let xml = std::fs::read_to_string(dir.join("data.xml")).unwrap();
+        assert!(xml.contains(&format!("<swapped>{kept}</swapped>")), "{typed} kept: want {kept}, got {xml}");
+        ok(&mut a, "doc_close", json!({ "doc": doc, "discard_changes": true }));
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A dynamic XFA form opens laid out from its template through the tools, renders, takes values
 /// and saves them.
 #[test]
 fn dynamic_xfa_forms_open_render_fill_and_save_through_tools() {

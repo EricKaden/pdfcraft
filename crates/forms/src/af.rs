@@ -99,6 +99,10 @@ pub struct Actions {
     /// A date field PdfCraft laid out for an XFA form (`/PCXfaDate true`): text its format doesn't
     /// read is kept and shown as typed rather than refused, as an XFA form keeps it.
     pub xfa_date: bool,
+    /// Such a field's edit pattern (its `AFDate_KeystrokeEx`) when it differs from the display
+    /// pattern [`Actions::format`] names: the value is typed and kept in this one, and shown in
+    /// that one.
+    pub edit_date: Option<String>,
 }
 
 /// Field scripts that aren't AF calls, by event.
@@ -116,31 +120,47 @@ impl Actions {
         self.format == Format::None && self.validate == Validate::None && self.calculate == Calculate::None
     }
 
-    /// The Keystroke event on commit ([`keystroke`]); an XFA date field keeps text its format
-    /// doesn't read, as typed.
+    /// The Keystroke event on commit ([`keystroke`]); an XFA date field checks the text against its
+    /// edit pattern and keeps what that doesn't read, as typed.
     pub fn keystroke(&self, field: &str, value: &str) -> Result<String, String> {
-        match keystroke(&self.format, field, value) {
+        let edit = self.edit_pattern().map(|p| Format::Date(p.to_string()));
+        match keystroke(edit.as_ref().unwrap_or(&self.format), field, value) {
             Err(_) if self.xfa_date => Ok(value.to_string()),
             checked => checked,
         }
     }
 
     /// What the Format event shows for `value` ([`format_value`]). An XFA date field shows a date
-    /// only for a value that is one, in its format already or as an ISO date (`2026-10-18` or
-    /// `20261018`); anything else, which its format would read loosely, shows as typed.
+    /// only for a value that is one, in its edit pattern (written in the display pattern) or as an
+    /// ISO date (`2026-10-18` or `20261018`); anything else, which its format would read loosely,
+    /// shows as typed.
     pub fn format_value(&self, value: &str) -> String {
-        match &self.format {
-            Format::Date(fmt) if self.xfa_date => {
+        match (&self.format, self.edit_pattern()) {
+            (Format::Date(fmt), Some(edit)) => {
                 let t = value.trim();
-                let in_format = parse_date(t, fmt).is_some_and(|dt| format_date(dt, fmt).eq_ignore_ascii_case(t));
-                match iso_date(t) {
-                    Some(dt) if !in_format => format_date(dt, fmt),
-                    _ => value.to_string(),
+                match parse_date(t, edit).filter(|dt| format_date(*dt, edit).eq_ignore_ascii_case(t)) {
+                    // Typed as it shows: kept as it is, its case too.
+                    Some(_) if edit == fmt => value.to_string(),
+                    Some(dt) => format_date(dt, fmt),
+                    None => iso_date(t).map_or_else(|| value.to_string(), |dt| format_date(dt, fmt)),
                 }
             }
-            f => format_value(f, value),
+            (f, _) => format_value(f, value),
         }
     }
+
+    /// An XFA date field's edit pattern: [`Actions::edit_date`], else its display pattern.
+    fn edit_pattern(&self) -> Option<&str> {
+        match &self.format {
+            Format::Date(fmt) if self.xfa_date => Some(self.edit_date.as_deref().unwrap_or(fmt)),
+            _ => None,
+        }
+    }
+}
+
+/// The pattern an `AFDate_KeystrokeEx("…")` keystroke script checks dates against.
+pub fn parse_date_keystroke(js: &str) -> Option<String> {
+    call(js, "AFDate_KeystrokeEx")?.first().and_then(Arg::string)
 }
 
 /// `text` as an ISO 8601 calendar date, `yyyy-mm-dd` or `yyyymmdd` (digits only, a real day).
@@ -1824,6 +1844,14 @@ mod tests {
         assert_eq!(mdy.format_value("xyz"), "xyz");
         assert_eq!(mdy.format_value("2016-02-30"), "2016-02-30", "not a real day: as typed");
         assert_eq!(xfa("ddmmmyy").format_value("18OCT16"), "18OCT16", "in the pattern, its case kept");
+        // Typed in an edit pattern unlike the display pattern: read with the one, shown in the other.
+        let swapped = Actions { edit_date: Some("dd/mm/yyyy".into()), ..xfa("mm/dd/yyyy") };
+        assert_eq!(swapped.format_value("18/10/2016"), "10/18/2016");
+        assert_eq!(swapped.format_value("10/11/2016"), "11/10/2016", "10 November");
+        assert_eq!(swapped.format_value("10/18/2016"), "10/18/2016", "not a day-first date: as typed");
+        assert_eq!(swapped.format_value("2016-10-18"), "10/18/2016");
+        assert_eq!(swapped.keystroke("Date", " 18/10/2016 "), Ok("18/10/2016".to_string()), "checked against the edit pattern");
+        assert_eq!(swapped.keystroke("Date", "10/18/2016"), Ok("10/18/2016".to_string()));
     }
 
     /// Date, time and mask formats show values in their pattern and refuse what doesn't fit.
