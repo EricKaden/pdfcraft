@@ -662,7 +662,8 @@ if (this.rawValue == "1") {
 /// A form whose text field `probe` counts its enters in `enters` and its exits in `exits`, whose
 /// text field `quiet` only shows a message when it is left, and whose radio button `size.large`
 /// counts its enters in `picks` and its exits in `drops` (each button of a radio group is a field
-/// with scripts of its own), and whose text field `hint` clears its "Type here" when it gains focus.
+/// with scripts of its own), whose text field `hint` clears its "Type here" when it gains focus, and
+/// whose text field `relay` puts that "Type here" back in `hint` when it loses focus.
 pub fn focus_template() -> String {
     let js = "application/x-javascript";
     let count = |name: &str| format!(r#"<script contentType="{js}">{name}.rawValue = Number({name}.rawValue) + 1;</script>"#);
@@ -682,6 +683,7 @@ pub fn focus_template() -> String {
  </exclGroup>
  {}{}{}{}
  <field name="hint" w="2in" h="0.3in"><ui><textEdit/></ui><value><text>Type here</text></value><event activity="enter"><script contentType="{js}">if (this.rawValue == "Type here") this.rawValue = "";</script></event></field>
+ <field name="relay" w="2in" h="0.3in"><ui><textEdit/></ui><event activity="exit"><script contentType="{js}">hint.rawValue = "Type here";</script></event></field>
 </subform>
 </template>
 </xdp:xdp>

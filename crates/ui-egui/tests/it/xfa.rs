@@ -190,7 +190,8 @@ fn xfa_enter_and_exit_scripts_run_whenever_the_focus_moves() {
 
 /// An enter script that changes the field it enters (clearing a "Type here") shows in the editor,
 /// so leaving the field keeps the script's value rather than writing the old one back; typing
-/// after it is kept as usual.
+/// after it is kept as usual. When the exit of the field left changed it first (`relay` puts the
+/// "Type here" back), the editor follows both scripts and ends on the enter script's value.
 #[test]
 fn an_enter_script_that_changes_its_field_shows_in_the_editor() {
     use egui::{Key, Modifiers};
@@ -213,6 +214,15 @@ fn an_enter_script_that_changes_its_field_shows_in_the_editor() {
     h.key_press_modifiers(Modifiers::NONE, Key::Tab);
     h.run_steps(4);
     assert_eq!(value(&h), "Ann");
+    // From `relay` back to `hint`: relay's exit puts "Type here" back over "Ann", then hint's enter
+    // clears it. The editor follows both, so it holds the last value, and Tab keeps it.
+    click_field(&mut h, "relay");
+    click_field(&mut h, "hint");
+    assert_eq!(value(&h), "", "relay's exit, then hint's enter");
+    assert_eq!(h.state().views[0].forms.focus.as_ref().map(|f| f.text.clone()).as_deref(), Some(""), "the editor holds the enter script's value");
+    h.key_press_modifiers(Modifiers::NONE, Key::Tab);
+    h.run_steps(4);
+    assert_eq!(value(&h), "");
 }
 
 #[test]
