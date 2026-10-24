@@ -38,6 +38,7 @@ pub(crate) const MAX_XML_DEPTH: usize = 1_024;
 /// cannot under-count a real element; a stray `<` in text is invalid XML and only makes it
 /// over-count, which errs towards refusing the document.
 pub(crate) fn xml_nesting_depth(text: &str) -> usize {
+    /// Where `needle` next starts in `hay` at or after `from`.
     fn find(hay: &[u8], from: usize, needle: &[u8]) -> Option<usize> {
         (from..hay.len()).find(|&p| hay[p..].starts_with(needle))
     }

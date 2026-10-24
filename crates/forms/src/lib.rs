@@ -1045,6 +1045,7 @@ pub fn calculations_changed(before: &[Field], after: &[Field]) -> Vec<String> {
         .collect()
 }
 
+/// A [`FormError::Invalid`] with message `m`.
 fn invalid<T>(m: impl Into<String>) -> Result<T, FormError> {
     Err(FormError::Invalid(m.into()))
 }

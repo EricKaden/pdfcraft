@@ -6948,6 +6948,8 @@ fn xfa_date_fields_keep_typed_dates_as_another_viewer_does() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A dynamic XFA form opens laid out from its template through the tools, renders, takes values
+/// and saves them.
 #[test]
 fn dynamic_xfa_forms_open_render_fill_and_save_through_tools() {
     let dir = workdir("xfa");

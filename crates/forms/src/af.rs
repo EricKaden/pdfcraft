@@ -61,6 +61,7 @@ impl CalcOp {
         }
     }
 
+    /// How the operation is named in a list of them (`sum (+)`, `average`).
     pub fn label(self) -> &'static str {
         match self {
             CalcOp::Sum => "sum (+)",
@@ -110,6 +111,7 @@ pub struct Scripts {
 }
 
 impl Actions {
+    /// Whether the field has no format, validation or calculation PdfCraft recognises.
     pub fn is_empty(&self) -> bool {
         self.format == Format::None && self.validate == Validate::None && self.calculate == Calculate::None
     }
@@ -1770,6 +1772,8 @@ mod tests {
         assert_eq!(calculation_reads("AFSimple_Calculate(\"SUM\", \"a, b\");"), ["a", "b"]);
     }
 
+    /// Number formats show separators, decimals, currency and negatives as AFNumber_Format does,
+    /// and the keystroke check stores the number.
     #[test]
     fn numbers_format_like_acrobat() {
         let n = |d, s, ng, c: &str, p| Format::Number { decimals: d, sep: s, neg: ng, currency: c.into(), prepend: p };
@@ -1822,6 +1826,7 @@ mod tests {
         assert_eq!(xfa("ddmmmyy").format_value("18OCT16"), "18OCT16", "in the pattern, its case kept");
     }
 
+    /// Date, time and mask formats show values in their pattern and refuse what doesn't fit.
     #[test]
     fn dates_times_and_masks() {
         let d = Format::Date("mm/dd/yyyy".into());
