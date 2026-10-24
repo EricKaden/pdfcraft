@@ -8083,7 +8083,7 @@ fn exporting_office_keeps_dotted_leader_entries_as_paragraphs() {
 
 /// layout:ready scripts run once on opening: the root's turns field highlighting on (only when it
 /// is off), a field's sets a value and a later script reads the new highlight, while page
-/// numbering is left to the layout and form:ready is another event.
+/// numbering is left to the layout. form:ready is another event, and runs too.
 #[test]
 fn a_forms_layout_ready_scripts_run_once_it_is_laid_out() {
     let bytes = Arc::new(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::layout_ready_template()));
@@ -8095,11 +8095,29 @@ fn a_forms_layout_ready_scripts_run_once_it_is_laid_out() {
     assert_eq!(value(&s, "stamp"), vec!["laid out".to_string()]);
     assert_eq!(value(&s, "seen"), vec!["true".to_string()], "a later script reads the highlight the root's turned on");
     assert!(value(&s, "pageNo").iter().all(|v| v.is_empty()), "page numbers are the layout's: {:?}", value(&s, "pageNo"));
-    assert!(value(&s, "note").iter().all(|v| v.is_empty()), "form:ready is another event");
+    assert_eq!(value(&s, "note"), vec!["form ready".to_string()], "form:ready runs on opening too");
     // With highlighting already on, the form has nothing to ask for.
     s.set_field_highlight(true);
     let id = s.open("ready.pdf", None, bytes, None).expect("opens");
     assert!(s.take_js_output(id).requests.is_empty());
+}
+
+/// The ready events run on opening in the order another viewer ran them on a synthetic form:
+/// initialize children first, form:ready and layout:ready parents first, docReady after the first
+/// layout:ready. A click that lays the form out again (showing a tall section: a second page)
+/// runs every layout:ready script again, once each, and they read the new page count.
+#[test]
+fn ready_events_run_in_order_and_layout_ready_runs_again_after_a_new_layout() {
+    let bytes = Arc::new(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::ready_events_template()));
+    let mut s = Session::new();
+    let id = s.open("ready.pdf", None, bytes, None).expect("opens");
+    let log = |s: &Session| s.get(id).unwrap().form.iter().find(|f| f.name == "log").map(|f| f.value.join("")).unwrap_or_default();
+    let opened = "title initialize|root initialize|root form:ready|title form:ready|root layout:ready pages=1|title layout:ready|root docReady";
+    assert_eq!(log(&s), opened);
+    assert_eq!(s.get(id).unwrap().info.pages.len(), 1);
+    s.apply(id, Edit::XfaEvent { som: "form[0].grow[0]".into(), activity: "click".into() }).expect("clicks");
+    assert_eq!(s.get(id).unwrap().info.pages.len(), 2, "the tall section takes a second page");
+    assert_eq!(log(&s), format!("{opened}|root layout:ready pages=2|title layout:ready"));
 }
 
 /// Field scripts of one edit read the field highlight an earlier one set: `on`'s calculation turns
