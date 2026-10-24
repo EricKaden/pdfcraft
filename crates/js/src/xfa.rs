@@ -15,7 +15,7 @@ use boa_engine::object::builtins::{JsArray, JsProxy};
 use boa_engine::property::Attribute;
 use boa_engine::{Context, JsObject, JsResult, JsString, JsValue, NativeFunction, Source, js_string};
 
-use crate::{Limits, Message, arg, as_number, error, function, platform, printd, printf, printx, refuse, s, text};
+use crate::{Limits, Message, arg, as_number, error, function, platform, printd, printf, printx, refuse, s, scand, text};
 
 /// What kind of template object a node is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -116,6 +116,8 @@ pub enum XfaEffect {
     MessageBox(Message),
     /// `xfa.host.resetData()`: the named fields, or every field when empty.
     ResetData(Vec<String>),
+    /// `app.execMenuItem("ShowHide…")`: show or hide a side panel.
+    ShowPanel(crate::Panel),
     Print,
     SaveAs,
     LaunchUrl(String),
@@ -221,7 +223,7 @@ fn payload(e: &XfaEffect) -> usize {
         XfaEffect::MessageBox(m) => m.bytes(),
         XfaEffect::LaunchUrl(s) | XfaEffect::SetFocus(s) => s.len(),
         XfaEffect::ResetData(names) => names.iter().fold(0usize, |n, s| n.saturating_add(s.len()).saturating_add(std::mem::size_of::<String>())),
-        XfaEffect::Print | XfaEffect::SaveAs | XfaEffect::Beep | XfaEffect::Recalculate | XfaEffect::Relayout => 0,
+        XfaEffect::Print | XfaEffect::SaveAs | XfaEffect::Beep | XfaEffect::Recalculate | XfaEffect::Relayout | XfaEffect::ShowPanel(_) => 0,
     }
 }
 
@@ -1133,14 +1135,14 @@ fn resolver(ctx: &mut Context, from: usize, many: bool) -> JsResult<JsValue> {
 
 // ── xfa.host, xfa.layout, xfa.event, app, console ───────────────────────────────────────────
 
-/// Record effect `e` with the run's host, against its limits.
+/// Records effect `e` on the host, against the run's limits, as [`XHost::push`] does.
 fn effect(ctx: &mut Context, e: XfaEffect) -> JsResult<()> {
     host(ctx)?.borrow_mut().push(e);
     Ok(())
 }
 
-/// `xfa.host.messageBox(message, title, icon, buttons)`: the message is kept with its title,
-/// icon and buttons.
+/// `xfa.host.messageBox(message, title, icon, buttons)`: records the message with its title,
+/// icon and buttons, its text and title cut to [`MAX_LINE`] characters, and returns 1.
 fn message_box(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
     let m = crate::message_box_message(args, ctx)?;
     effect(ctx, XfaEffect::MessageBox(m))?;
@@ -1158,28 +1160,36 @@ fn app_alert(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsVal
     Ok(JsValue::from(1.0))
 }
 
+/// `xfa.host.resetData(names)`: asks to reset the comma-separated fields, or every field when
+/// the list is empty.
 fn reset_data(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
     let list = text(&arg(args, 0), ctx)?;
     effect(ctx, XfaEffect::ResetData(reset_names(&list)))?;
     Ok(JsValue::undefined())
 }
 
+/// `xfa.host.print(…)`: asks to print; its arguments are ignored.
 fn print(_: &JsValue, _: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
     effect(ctx, XfaEffect::Print)?;
     Ok(JsValue::undefined())
 }
 
+/// `xfa.host.beep()`: asks to beep.
 fn beep(_: &JsValue, _: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
     effect(ctx, XfaEffect::Beep)?;
     Ok(JsValue::undefined())
 }
 
+/// `xfa.host.gotoURL(url)`: asks to open the URL.
 fn goto_url(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
     let u = text(&arg(args, 0), ctx)?;
     effect(ctx, XfaEffect::LaunchUrl(u))?;
     Ok(JsValue::undefined())
 }
 
+/// `xfa.host.setFocus(target)`: asks to focus the node, given as a node object or as a SOM
+/// expression resolved from the current node; an expression that names no node is passed on
+/// as written.
 fn set_focus(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
     let target = arg(args, 0);
     let som = match target.as_object() {
@@ -1198,11 +1208,14 @@ fn set_focus(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsVal
     Ok(JsValue::undefined())
 }
 
+/// `app.execMenuItem(name)`: the effect for the request the shared menu table gives the name
+/// (Save opens Save As too); an unknown name does nothing.
 fn exec_menu_item(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
     let item = text(&arg(args, 0), ctx)?;
-    match item.as_str() {
-        "SaveAs" | "Save" => effect(ctx, XfaEffect::SaveAs)?,
-        "Print" => effect(ctx, XfaEffect::Print)?,
+    match crate::menu_item(&item) {
+        Some(crate::Request::SaveAs) => effect(ctx, XfaEffect::SaveAs)?,
+        Some(crate::Request::Print) => effect(ctx, XfaEffect::Print)?,
+        Some(crate::Request::ShowPanel(p)) => effect(ctx, XfaEffect::ShowPanel(p))?,
         _ => {}
     }
     Ok(JsValue::undefined())
@@ -1249,8 +1262,9 @@ fn xfa_resolve(ctx: &mut Context, many: bool) -> JsResult<JsValue> {
     resolver(ctx, current, many)
 }
 
-/// Install the XFA object model for a script run on node `current`: `xfa`, `event`, `app`, `util`,
-/// `console` and the form's objects.
+/// Defines the globals for one script on node `current`: `xfa` (`form`, `host`, `layout`, `event`,
+/// `resolveNode` and more), `event` as the same object as `xfa.event`, `app`, `console`, `util`,
+/// and the nodes in scope by name, with `_name` for each repeatable one's instance manager.
 fn install(ctx: &mut Context, event: &XfaEvent, doc: &XfaDoc, current: usize) -> JsResult<()> {
     let rw = Attribute::CONFIGURABLE;
     let form = node_object(ctx, 0)?;
@@ -1361,6 +1375,7 @@ fn install(ctx: &mut Context, event: &XfaEvent, doc: &XfaDoc, current: usize) ->
         .function(NativeFunction::from_fn_ptr(printf), js_string!("printf"), 1)
         .function(NativeFunction::from_fn_ptr(printd), js_string!("printd"), 2)
         .function(NativeFunction::from_fn_ptr(printx), js_string!("printx"), 2)
+        .function(NativeFunction::from_fn_ptr(scand), js_string!("scand"), 2)
         .build();
     ctx.register_global_property(js_string!("util"), util, rw)?;
     // Unqualified names: the current node's children, its siblings, then each ancestor's
@@ -1434,7 +1449,7 @@ fn install(ctx: &mut Context, event: &XfaEvent, doc: &XfaDoc, current: usize) ->
         "DataView",
         "Intl",
     ];
-    let mut defined: Vec<String> = RESERVED.iter().map(|s| s.to_string()).collect();
+    let mut defined: Vec<String> = RESERVED.iter().map(ToString::to_string).collect();
     for scope in scopes {
         let kids: Vec<(usize, String, bool)> = {
             let h = host(ctx)?.borrow();
