@@ -6803,6 +6803,8 @@ fn repeated_xfa_print_buttons_work_through_tools_and_after_reopen() {
     check(&mut a, doc);
 }
 
+/// XFA scripts run through the tools: initialize and calculate on opening, calculations after
+/// form_fill, and a button's click script through js_run, adding a row that undo takes away.
 #[test]
 fn xfa_scripts_run_for_buttons_and_field_changes_through_tools() {
     let dir = workdir("xfa-scripts");
@@ -6860,6 +6862,7 @@ fn xfa_check_box_and_radio_clicks_run_through_form_fill() {
     assert!(log(&mut a).ends_with("no click;"), "{}", log(&mut a));
 }
 
+/// A form whose opening script runs away has its scripts turned off, and doc_info says so.
 #[test]
 fn doc_info_says_when_a_runaway_script_turned_the_forms_scripts_off() {
     let dir = workdir("xfa-scripts-off");

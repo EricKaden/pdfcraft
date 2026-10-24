@@ -159,6 +159,8 @@ fn xfa_check_box_and_radio_clicks_run_their_click_scripts_in_the_app() {
     assert!(log(&h).ends_with("no click;"), "{}", log(&h));
 }
 
+/// Clicking an XFA button in the app runs its click script: one adds a row, another shows its
+/// message as a notice.
 #[test]
 fn xfa_buttons_run_their_scripts_in_the_app() {
     let mut h = open(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::scripted_template()));

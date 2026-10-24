@@ -733,6 +733,7 @@ impl<'a, 'b> Runner<'a, 'b> {
         }
     }
 
+    /// The `activity` scripts of the object at `som` in the live form.
     fn events_of(&mut self, som: &str, activity: &str) -> Vec<ScriptEvent> {
         self.live().events.iter().filter(|e| e.som == som && e.activity == activity).cloned().collect()
     }
