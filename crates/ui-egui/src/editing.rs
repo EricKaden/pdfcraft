@@ -474,7 +474,9 @@ impl PdfCraftApp {
     /// however it moved (a click, Tab or Shift+Tab, Escape, a click on the page): the
     /// field it left runs its exit, then the field it reached runs its enter. The engine skips an
     /// exit the field's committed change already ran. A tab that closes runs nothing: its
-    /// document is going away, and a script changing it then would only ask to save it.
+    /// document is going away, and a script changing it then would only ask to save it. A script
+    /// that changes the field being edited (an enter clearing a placeholder) shows in its editor
+    /// ([`crate::forms_ui::refresh_draft`]), so leaving the field doesn't write the old value back.
     fn run_focus_scripts(&mut self, i: usize) {
         let Some(view) = self.views.get_mut(i) else { return };
         let now = view.forms.focus.as_ref().map(|f| (f.name.clone(), f.widget));
@@ -483,6 +485,9 @@ impl PdfCraftApp {
         }
         let left = std::mem::replace(&mut view.forms.focused, now.clone());
         let id = view.id;
+        // The edited field's value before the scripts, to tell its untouched draft from typing.
+        let before: Option<Vec<String>> =
+            now.as_ref().and_then(|(name, _)| self.session.get(id)?.form.iter().find(|f| &f.name == name).map(|f| f.value.clone()));
         use pdfcraft_engine::js::FieldFocus;
         for ((name, widget), focus) in [left.map(|l| (l, FieldFocus::Exit)), now.map(|n| (n, FieldFocus::Enter))].into_iter().flatten() {
             match self.session.field_focus(id, &name, widget, focus) {
@@ -492,6 +497,12 @@ impl PdfCraftApp {
                         && let Some(view) = self.views.get_mut(i)
                     {
                         view.document_changed(&info);
+                        if let Some(before) = &before
+                            && let Some(draft) = view.forms.focus.as_mut()
+                            && let Some(f) = self.session.get(id).and_then(|d| d.form.iter().find(|f| f.name == draft.name))
+                        {
+                            crate::forms_ui::refresh_draft(draft, before, &f.value);
+                        }
                     }
                     let out = self.session.take_js_output(id);
                     self.handle_js(id, out);

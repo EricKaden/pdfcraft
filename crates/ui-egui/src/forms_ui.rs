@@ -108,6 +108,16 @@ fn open_focus(f: &FormField, widget: usize) -> Focus {
     }
 }
 
+/// After a script changed the value of the field being edited from `before` to `after`: the
+/// editor shows `after` (as [`open_focus`] would), unless the person has typed there already
+/// (the draft no longer holds `before`), whose typing then stays theirs to commit.
+pub(crate) fn refresh_draft(focus: &mut Focus, before: &[String], after: &[String]) {
+    if focus.picked.as_slice() == before && focus.text == before.first().map(String::as_str).unwrap_or_default() {
+        focus.text = after.first().cloned().unwrap_or_default();
+        focus.picked = after.to_vec();
+    }
+}
+
 /// Select a radio button, if it isn't selected already.
 fn select_edit(f: &FormField, w: &FormWidget) -> Option<Edit> {
     (w.on_state.as_ref() != f.value.first()).then(|| Edit::SetFieldValue { name: f.name.clone(), value: FieldValue::Radio(w.on_state.clone()) })
@@ -811,4 +821,43 @@ pub fn field_screen_rect(view: &DocView, info: &DocInfo, f: &FormField, widget: 
     let page = w.page?;
     let xf = view.page_xform(page)?;
     Some(widget_rect(&xf, info, page, w.rect))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A draft as the editor opens it on a field holding `value`.
+    fn draft(value: &[&str]) -> Focus {
+        Focus {
+            name: "hint".into(),
+            widget: 0,
+            text: value.first().map(|s| s.to_string()).unwrap_or_default(),
+            picked: value.iter().map(|s| s.to_string()).collect(),
+            request_focus: true,
+            select_all: false,
+            press: None,
+            calendar: None,
+            calendar_rect: None,
+            calendar_text: None,
+        }
+    }
+
+    /// An untouched draft takes the value a script gave the field; typing is kept.
+    #[test]
+    fn a_draft_follows_a_scripts_change_until_something_is_typed() {
+        let before = vec!["Type here".to_string()];
+        let mut untouched = draft(&["Type here"]);
+        refresh_draft(&mut untouched, &before, &[]);
+        assert_eq!((untouched.text.as_str(), untouched.picked.len()), ("", 0));
+        let mut typed = draft(&["Type here"]);
+        typed.text = "Ann".into();
+        refresh_draft(&mut typed, &before, &[]);
+        assert_eq!(typed.text, "Ann", "the person's typing stays");
+        // A list's choices count as typing too.
+        let mut picked = draft(&["a"]);
+        picked.picked.push("b".into());
+        refresh_draft(&mut picked, &["a".to_string()], &["c".to_string()]);
+        assert_eq!(picked.picked, ["a", "b"]);
+    }
 }

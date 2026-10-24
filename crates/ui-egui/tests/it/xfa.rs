@@ -188,6 +188,33 @@ fn xfa_enter_and_exit_scripts_run_whenever_the_focus_moves() {
     assert!(h.query_by_label_contains("left quiet").is_some(), "console: {:?}", h.state().js_console.log);
 }
 
+/// An enter script that changes the field it enters (clearing a "Type here") shows in the editor,
+/// so leaving the field keeps the script's value rather than writing the old one back; typing
+/// after it is kept as usual.
+#[test]
+fn an_enter_script_that_changes_its_field_shows_in_the_editor() {
+    use egui::{Key, Modifiers};
+    let mut h = open(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::focus_template()));
+    wait_for_pages(&mut h);
+    let value = |h: &Harness<'static, PdfCraftApp>| {
+        let s = h.state();
+        s.session.get(s.views[0].id).unwrap().form.iter().find(|f| f.name == "hint").and_then(|f| f.value.first().cloned()).unwrap_or_default()
+    };
+    assert_eq!(value(&h), "Type here");
+    click_field(&mut h, "hint");
+    assert_eq!(value(&h), "", "the enter script cleared it");
+    assert_eq!(h.state().views[0].forms.focus.as_ref().map(|f| f.text.clone()).as_deref(), Some(""), "and the editor shows that");
+    h.key_press_modifiers(Modifiers::NONE, Key::Tab);
+    h.run_steps(4);
+    assert_eq!(value(&h), "", "leaving it doesn't write \"Type here\" back");
+    click_field(&mut h, "hint");
+    h.event(egui::Event::Text("Ann".into()));
+    h.run_steps(2);
+    h.key_press_modifiers(Modifiers::NONE, Key::Tab);
+    h.run_steps(4);
+    assert_eq!(value(&h), "Ann");
+}
+
 #[test]
 fn messages_from_scripts_run_on_open_show_right_away() {
     let tpl = pdfcraft_xfa::fixtures::scripted_template()
