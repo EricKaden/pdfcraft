@@ -701,10 +701,11 @@ pub(crate) fn overlay(
     let w = f.widgets.get(focus.widget)?;
     let page = w.page?;
     let Some(xf) = view.page_xform(page) else {
-        // A check box or radio button scrolled out of view lets go (it has no draft to keep):
-        // taking the keyboard back when its page returns would turn scrolling arrows into
-        // choices, or pull the keyboard from wherever the user went meanwhile.
-        if matches!(f.kind, FormFieldKind::CheckBox | FormFieldKind::Radio) {
+        // A check box, radio button or push button scrolled out of view lets go (it has no draft
+        // to keep): taking the keyboard back when its page returns would turn scrolling arrows
+        // into choices, or pull the keyboard from wherever the user went meanwhile, and a focus
+        // nothing shows would keep the page keys off.
+        if matches!(f.kind, FormFieldKind::CheckBox | FormFieldKind::Radio | FormFieldKind::PushButton) {
             view.forms.focus = None;
         }
         return None;
