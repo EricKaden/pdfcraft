@@ -317,7 +317,9 @@ impl Session {
 
     /// [`Session::run_javascript`] for a field's action on `trigger`: the script sees the field
     /// event that trigger names (`event.name` "Mouse Down", "Focus", …), and only Mouse Up runs a
-    /// laid-out XFA button's click script instead.
+    /// laid-out XFA button's click script instead. Off a click (Mouse Enter or Exit, Focus,
+    /// Blur), its requests to print, open a link or Save As, or show a side panel are dropped and
+    /// noted on the console.
     pub fn run_field_script(&mut self, id: DocId, script: &str, target: Option<&str>, trigger: FieldTrigger) -> Result<Outcome, EditError> {
         if self.js_off {
             return Err(EditError::Invalid("JavaScript is turned off (Preferences ▸ JavaScript)".into()));
@@ -350,6 +352,22 @@ impl Session {
             None => pdfcraft_js::Event::doc("Console"),
         };
         let mut o = pdfcraft_js::run(script, &event, &runner.doc, &states, &runner.doc_scripts, Limits::default());
+        // Only a click (its press or its release) may print, open a link or Save As, or show a
+        // side panel: the pointer passing over a field, or the focus moving, is no one asking to.
+        if !trigger.is_click() {
+            let label = trigger.label();
+            o.requests.retain(|r| {
+                let what = match r {
+                    pdfcraft_js::Request::Print => "print",
+                    pdfcraft_js::Request::LaunchUrl(_) => "open a link",
+                    pdfcraft_js::Request::SaveAs => "open Save As",
+                    pdfcraft_js::Request::ShowPanel(_) => "show a side panel",
+                    _ => return true,
+                };
+                o.console.push(format!("A field's {label} script asked to {what}; only a click may"));
+                false
+            });
+        }
         let changes = changes(&states, &o.changed);
         let resets: Vec<Vec<String>> = o
             .requests

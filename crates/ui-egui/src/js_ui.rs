@@ -134,7 +134,8 @@ impl PdfCraftApp {
     }
 
     /// Run what widget `widget` of field `name` on tab `i` does on `trigger` (ISO 32000-2 Table
-    /// 197): a JavaScript sees that event, and any other action runs as a push button's does.
+    /// 197): a JavaScript sees that event, and any other action runs as a push button's does,
+    /// except that only a click may run a menu item, open a link, submit or pick a picture.
     /// With JavaScript turned off its scripts don't run, and nothing says so: only a push
     /// button's click asks for one to run. A script that changes the field being edited shows in
     /// its editor, as an XFA enter script's does.
@@ -143,6 +144,12 @@ impl PdfCraftApp {
         let Some(id) = self.views.get(i).map(|v| v.id) else { return };
         let Some(action) = self.session.field_action(id, name, widget, trigger) else { return };
         let B::Script(js) = action else {
+            // Off a click, an action may not run a menu item (print, save), open a link, submit
+            // or pick a picture: it changes the form, the view or the layers, or shows a message.
+            if !trigger.is_click() && matches!(action, B::Named(_) | B::Uri(_) | B::Submit(_) | B::ImportIcon) {
+                self.js_console.log.push(format!("{name}: its {} action only runs on a click", trigger.label()));
+                return;
+            }
             crate::canvas::run_button(self, i, name, action);
             return;
         };

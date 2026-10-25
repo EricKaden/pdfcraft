@@ -5306,6 +5306,24 @@ fn a_fields_trigger_actions_run_as_their_own_events() {
     assert!(s.field_action(id, "log", 0, crate::FieldTrigger::MouseEnter).is_none());
 }
 
+/// Only a click may print, open a link or Save As: the same script run as a field's Mouse Enter
+/// or Focus has those requests dropped and noted, and as its Mouse Up keeps them.
+#[test]
+fn only_a_clicks_trigger_scripts_may_print_open_links_or_save_as() {
+    use crate::FieldTrigger as T;
+    let mut s = Session::new();
+    let id = s.open("triggers.pdf", None, Arc::new(pdfcraft_forms::fixtures::trigger_form()), None).expect("opens");
+    let js = r#"this.print(); app.launchURL("https://example.com/"); app.execMenuItem("SaveAs"); this.pageNum = 0;"#;
+    for t in [T::MouseEnter, T::MouseExit, T::OnFocus, T::OnBlur] {
+        let o = s.run_field_script(id, js, Some("a"), t).unwrap();
+        assert_eq!(o.requests, [pdfcraft_js::Request::GoToPage(0)], "{t:?}: only the page change");
+        assert_eq!(o.console.iter().filter(|c| c.contains("only a click may")).count(), 3, "{t:?}: {:?}", o.console);
+    }
+    for t in [T::MouseDown, T::MouseUp] {
+        assert_eq!(s.run_field_script(id, js, Some("a"), t).unwrap().requests.len(), 4, "{t:?}");
+    }
+}
+
 /// A field's exit scripts run every time it loses focus, changed or not, and its enter scripts
 /// every time it gains it; each run that changes the form is one undo step.
 #[test]

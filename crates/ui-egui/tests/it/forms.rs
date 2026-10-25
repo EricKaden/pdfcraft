@@ -1601,3 +1601,37 @@ fn a_fields_mouse_and_focus_actions_run_in_another_viewers_order() {
     click(&mut h, p);
     assert_eq!(log(&h).get(before..).unwrap_or_default(), "|btn Mouse Exit|cb Mouse Enter|cb Mouse Down|cb Focus|cb Mouse Up", "the check box");
 }
+
+/// Off a click, a field's action may not run a menu item: hovering a field whose Mouse Enter
+/// prints opens no Print dialog, while clicking a field whose Mouse Up prints does.
+#[test]
+fn only_a_click_runs_a_fields_print_action() {
+    let bytes = pdf_from_objects(&[
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [4 0 R 5 0 R] /DA (/Helv 0 Tf 0 g) >> >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 300 400] >>",
+        "<< /Type /Page /Parent 2 0 R /Annots [4 0 R 5 0 R] >>",
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (hover) /Rect [20 350 280 372] /P 3 0 R /F 4 /AA << /E << /S /Named /N /Print >> >> >>",
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (click) /Rect [20 300 280 322] /P 3 0 R /F 4 /AA << /U << /S /Named /N /Print >> >> >>",
+    ]);
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(|_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("print.pdf", None, bytes).unwrap();
+        app.set_option("left", "closed").unwrap();
+        app.set_option("zoom", "150").unwrap();
+        app
+    });
+    h.run_steps(6);
+    let at = |h: &Harness<'static, PdfCraftApp>, name: &str| {
+        let s = h.state();
+        let doc = s.session.get(s.views[0].id).unwrap();
+        let f = doc.form.iter().find(|f| f.name == name).unwrap();
+        pdfcraft_ui_egui::forms_ui::field_screen_rect(&s.views[0], &doc.info, f, 0).expect("on screen").center()
+    };
+    h.hover_at(at(&h, "hover"));
+    h.run_steps(3);
+    assert_eq!(h.state().dialog, None, "hovering prints nothing");
+    let p = at(&h, "click");
+    click_at(&mut h, p);
+    assert!(h.state().dialog.is_some(), "a click on the field may print");
+}
