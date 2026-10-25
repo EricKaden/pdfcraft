@@ -1572,6 +1572,16 @@ mod runtime_highlight {
         let o = go("for (var i = 0; i < 5001; i++) { app.runtimeHighlight = !app.runtimeHighlight; }", &ev);
         assert_eq!(o.error, None);
         assert_eq!(o.requests, vec![Request::Highlight(true)], "one request, the last setting");
+        // Past the request cap the request is dropped, and the script goes on reading the
+        // setting the viewer has.
+        let full = format!(
+            "for (var i = 0; i < {}; i++) app.execMenuItem('Print'); app.runtimeHighlight = true; event.value = String(app.runtimeHighlight);",
+            crate::xfa::MAX_EFFECTS
+        );
+        let o = go(&full, &ev);
+        assert_eq!(o.error, None);
+        assert_eq!(o.value, "false", "the dropped request changed nothing");
+        assert!(!o.requests.iter().any(|r| matches!(r, Request::Highlight(_))));
     }
 
     /// The same in XFA scripts, where the change is an effect; nothing is asked for when the

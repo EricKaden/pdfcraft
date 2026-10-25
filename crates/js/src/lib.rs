@@ -281,10 +281,10 @@ impl Host {
 
     /// Record `r`, its names and URLs cut to a message's length, up to [`xfa::MAX_EFFECTS`]
     /// requests and the run's byte budget.
-    fn request(&mut self, r: Request) {
+    fn request(&mut self, r: Request) -> bool {
         if self.requests.len() >= xfa::MAX_EFFECTS {
             self.dropped = self.dropped.saturating_add(1);
-            return;
+            return false;
         }
         let r = match r {
             Request::Reset(names) => Request::Reset(names.into_iter().map(xfa::clip).collect()),
@@ -298,9 +298,11 @@ impl Host {
             Request::LaunchUrl(u) | Request::Submit(u) | Request::Focus(u) => u.len(),
             _ => 0,
         };
-        if self.room(bytes) {
+        let kept = self.room(bytes);
+        if kept {
             self.requests.push(r);
         }
+        kept
     }
 }
 
@@ -689,11 +691,13 @@ fn set_runtime_highlight(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> Js
     let on = arg(args, 0).to_boolean();
     let mut h = host(ctx)?.borrow_mut();
     if h.doc.highlight != on {
-        h.doc.highlight = on;
         // Only the setting the script ends with matters: one request, the latest, under the
-        // host's request cap like any other.
+        // host's request cap like any other. One the cap drops changes nothing, so the script
+        // goes on reading the setting the viewer has.
         h.requests.retain(|r| !matches!(r, Request::Highlight(_)));
-        h.request(Request::Highlight(on));
+        if h.request(Request::Highlight(on)) {
+            h.doc.highlight = on;
+        }
     }
     Ok(JsValue::undefined())
 }
