@@ -13,7 +13,7 @@ use std::sync::Arc;
 use base64::Engine;
 
 use crate::XfaError;
-use crate::data::{DataNode, data_date_letters, data_path, data_to_iso, date_letters, is_on, iso_to_pattern};
+use crate::data::{DataNode, data_date_letters, data_path, data_to_iso, date_letters, is_on, iso_to_pattern, pattern_to_iso};
 use crate::model::{
     Access, Area, Border, Common, Draw, ExclGroup, Field, Font, HAlign, Layout, Margin, Node, Occur, PageArea, PageRole, Para, Placement, Presence,
     Rect, Script, SomIndices, Stroke, Subform, Template, Ui, VAlign, Value,
@@ -465,6 +465,15 @@ fn divide(item: Item, cut: f64) -> (Option<Item>, Option<Item>) {
             }
         }
         other => (Some(other), None),
+    }
+}
+
+/// A template's canonical date `v` (ISO `2016-10-11`, or its basic form `20161011`) written in
+/// `pattern`; anything else as it is.
+fn canonical_date_in(v: &str, pattern: &str) -> String {
+    match ["yyyy-mm-dd", "yyyymmdd"].iter().find_map(|p| pattern_to_iso(v, p)) {
+        Some(iso) => iso_to_pattern(&iso, pattern),
+        None => v.to_string(),
     }
 }
 
@@ -2034,12 +2043,15 @@ impl Layouter<'_> {
             }
             Ui::DateTimeEdit => {
                 let pattern = date_pattern(f.picture.as_deref());
-                // The data holds the date in the field's data picture, or else as an ISO date; the
-                // field shows it in its own pattern.
+                // The data holds the date in the field's data picture, or else as an ISO date; a
+                // template default is a canonical date (ISO, or its basic form). Either way the
+                // field holds it in its own pattern, as a date typed there is held, so its value
+                // never reads two ways (an ISO date read in a `yyyy-dd-mm` pattern, say).
                 let data_pattern = data_date_letters(f);
-                let shown = plain_value
-                    .as_ref()
-                    .map(|v| if data_value.is_some() { iso_to_pattern(&data_to_iso(v, data_pattern.as_deref()), &pattern) } else { v.clone() });
+                let shown = plain_value.as_ref().map(|v| match data_value {
+                    Some(_) => iso_to_pattern(&data_to_iso(v, data_pattern.as_deref()), &pattern),
+                    None => canonical_date_in(v, &pattern),
+                });
                 (WidgetKind::Date(pattern), ui, widget_border(f.ui_border.as_ref(), false), shown, f.tooltip.clone())
             }
             Ui::ChoiceList => {
@@ -2067,6 +2079,11 @@ impl Layouter<'_> {
             return Ok(());
         }
         let action = if f.ui == Ui::Button { button_action(&f.scripts) } else { None };
+        // A date field's default, like its value, in the field's own pattern.
+        let default = match &kind {
+            WidgetKind::Date(pattern) => template_default.map(|v| canonical_date_in(&v, pattern)),
+            _ => template_default,
+        };
         let items: Vec<String> = match &kind {
             WidgetKind::CheckBox { on, .. } => vec![on.clone(), f.items.get(1).cloned().unwrap_or_default()],
             WidgetKind::Radio { on, .. } => vec![on.clone()],
@@ -2086,7 +2103,7 @@ impl Layouter<'_> {
             read_only,
             border,
             value,
-            default: template_default,
+            default,
             action,
             items,
             no_scroll: f.no_scroll,
