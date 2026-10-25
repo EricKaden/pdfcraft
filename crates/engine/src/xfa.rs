@@ -938,7 +938,7 @@ pub(crate) fn on_focus(doc: &mut pdfcraft_cos::Document, tpl: &Template, som: &s
     }
     if !r.changes.is_empty() {
         // The calculations that follow get a budget of their own.
-        r.clock = Clock::start(OPEN_BUDGET_MS);
+        r.clock = Clock::start(OPEN_BUDGET_MS.saturating_mul(u64::from(r.run.time_scale)));
         r.calculates()?;
     }
     r.finish()
