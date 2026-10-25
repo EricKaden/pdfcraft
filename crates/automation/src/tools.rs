@@ -1155,6 +1155,16 @@ pub fn tools() -> Vec<ToolDef> {
                 json!({ "doc": doc(), "script": { "type": "string" }, "field": { "type": "string", "description": "Run as this button's Mouse Up event." } }),
                 &["doc", "script"],
             )),
+        t("form_trigger", "Run a field's mouse or focus action", "Run what a field's widget does on a trigger, as the pointer or the focus sets it off in the app: mouse_enter and mouse_exit (the pointer arrives over it or leaves), mouse_down and mouse_up (a press and release on it), on_focus and on_blur (it gains or loses the focus) — the widget's /A and /AA actions (ISO 32000-2 Table 197). A JavaScript action runs with that event (event.name Mouse Enter, Mouse Exit, Mouse Down, Mouse Up, Focus, Blur), its field changes one undoable step; an alert is returned; any other action (reset, show/hide, link, page, menu item, submit) is reported as `action` with `performed` false. `action` is null when the widget has none for that trigger. widget picks the radio button or copy of the field (1-based, default 1; see form_fields).")
+            .with(schema(
+                json!({
+                    "doc": doc(),
+                    "field": { "type": "string", "description": "Field name (from form_fields)." },
+                    "trigger": { "type": "string", "enum": ["mouse_up", "mouse_down", "mouse_enter", "mouse_exit", "on_focus", "on_blur"] },
+                    "widget": { "type": "integer", "minimum": 1, "description": "Widget of the field (1-based, default 1): a radio button of the group, or a copy of the field." },
+                }),
+                &["doc", "field", "trigger"],
+            )),
         t("js_document_scripts", "Document JavaScripts", "List the document-level JavaScripts (name and source), which define functions field scripts use.")
             .ro()
             .cmd("tools.document_js")

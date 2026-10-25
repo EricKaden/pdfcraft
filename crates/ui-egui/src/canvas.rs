@@ -4511,9 +4511,9 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
             crate::forms_ui::FormNotice::NoAction(name) => app.notify_fmt("{name} has no action", &[("name", &name)]),
         }
     }
-    if let Some((name, action)) = app.views[index].forms.button.take() {
-        run_button(app, index, &name, action);
-    }
+    // Mouse Enter, Exit and Down now; Mouse Up, and a push button's action, once the press's
+    // commit and focus scripts have run (`PdfCraftApp::process_pending_edits`).
+    app.run_pointer_triggers(index);
     if copy_selected {
         app.execute("edit.copy");
     }
@@ -4629,8 +4629,9 @@ fn selection_actions(
     false
 }
 
-/// Run a push button's action (the ones that need no JavaScript engine).
-fn run_button(app: &mut PdfCraftApp, index: usize, name: &str, action: pdfcraft_engine::form_scripts::ButtonAction) {
+/// Run a field's action: a push button's click, or any trigger's ([`PdfCraftApp::run_field_trigger`]).
+/// A script goes to the JavaScript engine; the other actions need none.
+pub(crate) fn run_button(app: &mut PdfCraftApp, index: usize, name: &str, action: pdfcraft_engine::form_scripts::ButtonAction) {
     use pdfcraft_engine::form_scripts::ButtonAction as B;
     let pages = app.session.get(app.views[index].id).map_or(0, |d| d.info.pages.len());
     match action {

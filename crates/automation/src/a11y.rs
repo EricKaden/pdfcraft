@@ -728,6 +728,55 @@ impl Automation {
         )
     }
 
+    /// `form_trigger`: run what widget `widget` (1-based) of `field` does on `trigger`, as the
+    /// pointer or the focus would set it off: a JavaScript action sees that event's name; any other
+    /// action is reported, not performed.
+    pub(crate) fn form_trigger(&mut self, a: &Args) -> Result<Value> {
+        use pdfcraft_engine::FieldTrigger;
+        use pdfcraft_engine::form_scripts::ButtonAction as B;
+        let t = a.str("trigger")?;
+        let trigger = FieldTrigger::from_id(t).ok_or_else(|| {
+            let ids: Vec<&str> = FieldTrigger::ALL.iter().map(|t| t.id()).collect();
+            ToolError::InvalidArgs(format!("trigger must be one of {}, not {t:?}", ids.join(", ")))
+        })?;
+        let name = a.str("field")?;
+        let doc = self.doc(a)?;
+        let field = doc.form.iter().find(|f| f.name == name).ok_or_else(|| failed(format!("there is no field named {name:?} (see form_fields)")))?;
+        let widgets = field.widgets.len().max(1);
+        let widget = usize::try_from(a.opt_int("widget")?.unwrap_or(1))
+            .ok()
+            .and_then(|w| w.checked_sub(1))
+            .filter(|w| *w < widgets)
+            .ok_or_else(|| ToolError::InvalidArgs(format!("widget must be 1 to {widgets} for {name:?}")))?;
+        let id = doc.id;
+        let Some(action) = self.session.field_action(id, name, widget, trigger) else {
+            return Ok(json!({ "trigger": trigger.id(), "action": null }));
+        };
+        let kind = match &action {
+            B::Reset { .. } => "reset",
+            B::Named(_) => "named",
+            B::Uri(_) => "uri",
+            B::GoTo(_) => "go_to",
+            B::ShowHide { .. } => "show_hide",
+            B::SetLayers { .. } => "set_layers",
+            B::Alert(_) => "alert",
+            B::Submit(_) => "submit",
+            B::ImportIcon => "import_icon",
+            B::Script(_) => "javascript",
+        };
+        match action {
+            B::Script(js) => {
+                let o = self.session.run_field_script(id, &js, Some(name), trigger).map_err(failed)?;
+                let reqs: Vec<Value> = o.requests.iter().map(request_json).collect();
+                Ok(
+                    json!({ "trigger": trigger.id(), "action": kind, "performed": true, "alerts": o.alerts, "console": o.console, "requests": reqs, "error": o.error }),
+                )
+            }
+            B::Alert(m) => Ok(json!({ "trigger": trigger.id(), "action": kind, "performed": true, "alerts": [m] })),
+            _ => Ok(json!({ "trigger": trigger.id(), "action": kind, "performed": false })),
+        }
+    }
+
     pub(crate) fn js_document_scripts(&self, a: &Args) -> Result<Value> {
         let list: Vec<Value> = self.doc(a)?.document_scripts().into_iter().map(|(n, s)| json!({ "name": n, "script": s })).collect();
         Ok(json!({ "scripts": list }))

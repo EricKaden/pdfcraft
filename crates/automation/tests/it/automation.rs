@@ -9112,3 +9112,30 @@ fn page_render_draws_stamps_without_an_appearance() {
     let grey = custom.iter().filter(|p| p[0].abs_diff(p[1]) < 24 && p[1].abs_diff(p[2]) < 24).count();
     assert!(grey > 100 && grey == custom.len(), "an unknown name is a grey placeholder: {grey} of {}", custom.len());
 }
+
+/// form_trigger runs a field's action for each trigger with that event's name (Mouse Enter,
+/// Mouse Exit, Mouse Down, Mouse Up, Focus, Blur), says when a widget has none, and refuses an
+/// unknown trigger or a widget the field doesn't have.
+#[test]
+fn form_trigger_runs_a_fields_mouse_and_focus_actions() {
+    let dir = workdir("form-trigger");
+    std::fs::write(dir.join("triggers.pdf"), pdfcraft_engine::form_fixtures::trigger_form()).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "triggers.pdf" }))["doc"].as_u64().unwrap();
+    for t in ["mouse_enter", "mouse_down", "on_focus", "mouse_up", "mouse_exit", "on_blur"] {
+        let out = ok(&mut a, "form_trigger", json!({ "doc": doc, "field": "a", "trigger": t }));
+        assert_eq!((out["action"].clone(), out["performed"].clone()), (json!("javascript"), json!(true)), "{out}");
+    }
+    let fields = ok(&mut a, "form_fields", json!({ "doc": doc }));
+    let log = fields["fields"].as_array().unwrap().iter().find(|f| f["name"] == "log").map(|f| f["value"].clone()).unwrap();
+    assert_eq!(log, json!("a Mouse Enter|a Mouse Down|a Focus|a Mouse Up|a Mouse Exit|a Blur"));
+    assert_eq!(ok(&mut a, "form_trigger", json!({ "doc": doc, "field": "log", "trigger": "mouse_enter" }))["action"], Value::Null);
+    for bad in [
+        json!({ "doc": doc, "field": "a", "trigger": "hover" }),
+        json!({ "doc": doc, "field": "a", "trigger": "mouse_up", "widget": 2 }),
+        json!({ "doc": doc, "field": "nowhere", "trigger": "mouse_up" }),
+    ] {
+        assert!(a.call("form_trigger", &bad).is_err(), "{bad}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

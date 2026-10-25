@@ -883,6 +883,7 @@ impl Automation {
             "accessibility_autotag_form_fields" => self.accessibility_autotag_form_fields(&a)?,
             "ocr_recognize" => self.ocr_recognize(&a)?,
             "js_run" => self.js_run(&a)?,
+            "form_trigger" => self.form_trigger(&a)?,
             "js_document_scripts" => self.js_document_scripts(&a)?,
             "js_set_document_script" => self.js_set_document_script(&a)?,
             "js_enabled" => self.js_enabled(&a)?,

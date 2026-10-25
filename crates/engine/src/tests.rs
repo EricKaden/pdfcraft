@@ -5292,6 +5292,20 @@ fn field_text(s: &Session, id: DocId, name: &str) -> String {
     s.get(id).and_then(|d| d.form.iter().find(|f| f.name == name).and_then(|f| f.value.first().cloned())).unwrap_or_default()
 }
 
+/// A field's action for each trigger runs as that event (`event.name` Mouse Enter, Mouse Exit,
+/// Mouse Down, Mouse Up, Focus, Blur, as another viewer names them), and what it changes is kept.
+#[test]
+fn a_fields_trigger_actions_run_as_their_own_events() {
+    let mut s = Session::new();
+    let id = s.open("triggers.pdf", None, Arc::new(pdfcraft_forms::fixtures::trigger_form()), None).expect("opens");
+    for t in crate::FieldTrigger::ALL {
+        let Some(crate::form_scripts::ButtonAction::Script(js)) = s.field_action(id, "a", 0, t) else { panic!("a has a script for {t:?}") };
+        s.run_field_script(id, &js, Some("a"), t).unwrap();
+    }
+    assert_eq!(field_text(&s, id, "log"), "a Mouse Up|a Mouse Down|a Mouse Enter|a Mouse Exit|a Focus|a Blur");
+    assert!(s.field_action(id, "log", 0, crate::FieldTrigger::MouseEnter).is_none());
+}
+
 /// A field's exit scripts run every time it loses focus, changed or not, and its enter scripts
 /// every time it gains it; each run that changes the form is one undo step.
 #[test]

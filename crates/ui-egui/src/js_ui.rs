@@ -89,6 +89,98 @@ impl PdfCraftApp {
         }
     }
 
+    /// The pointer's triggers on tab `index` this frame, in another viewer's order: the widget it
+    /// left runs its Mouse Exit action and the one it reached its Mouse Enter, then a press runs
+    /// the pressed widget's Mouse Down, before the field the focus leaves commits.
+    pub(crate) fn run_pointer_triggers(&mut self, index: usize) {
+        use pdfcraft_engine::FieldTrigger as T;
+        // A field's editor, drawn over the field (or closing over it this frame), hides the
+        // pointer from the pages: while no dialog is open and the pointer is still inside the
+        // widget it was over, it hasn't left.
+        let still = self.views.get(index).and_then(|view| {
+            let (name, widget) = view.forms.hovered.clone()?;
+            let p = self.ctx.as_ref()?.input(|i| i.pointer.hover_pos())?;
+            let doc = self.session.get(view.id)?;
+            let f = doc.form.iter().find(|f| f.name == name)?;
+            let inside = crate::forms_ui::field_screen_rect(view, &doc.info, f, widget)?.contains(p);
+            (inside && !self.modal_open()).then_some((name, widget))
+        });
+        let Some(view) = self.views.get_mut(index) else { return };
+        let seen = view.forms.hover_seen.take().or(still);
+        let mut queue = Vec::new();
+        if view.forms.hovered != seen {
+            let left = std::mem::replace(&mut view.forms.hovered, seen.clone());
+            queue.extend(left.map(|(n, w)| (n, w, T::MouseExit)));
+            queue.extend(seen.map(|(n, w)| (n, w, T::MouseEnter)));
+        }
+        queue.extend(std::mem::take(&mut view.forms.pressed_on).into_iter().map(|(n, w)| (n, w, T::MouseDown)));
+        for (name, widget, trigger) in queue {
+            self.run_field_trigger(index, &name, widget, trigger);
+        }
+    }
+
+    /// What a click released on tab `i` runs once its commit and focus scripts have: the Mouse Up
+    /// action of the field it released on, or a push button's action.
+    pub(crate) fn run_release_triggers(&mut self, i: usize) {
+        let Some(view) = self.views.get_mut(i) else { return };
+        let released = std::mem::take(&mut view.forms.released_on);
+        let button = view.forms.button.take();
+        for (name, widget) in released {
+            self.run_field_trigger(i, &name, widget, pdfcraft_engine::FieldTrigger::MouseUp);
+        }
+        if let Some((name, action)) = button {
+            crate::canvas::run_button(self, i, &name, action);
+        }
+    }
+
+    /// Run what widget `widget` of field `name` on tab `i` does on `trigger` (ISO 32000-2 Table
+    /// 197): a JavaScript sees that event, and any other action runs as a push button's does.
+    /// With JavaScript turned off its scripts don't run, and nothing says so: only a push
+    /// button's click asks for one to run. A script that changes the field being edited shows in
+    /// its editor, as an XFA enter script's does.
+    pub(crate) fn run_field_trigger(&mut self, i: usize, name: &str, widget: usize, trigger: pdfcraft_engine::FieldTrigger) {
+        use pdfcraft_engine::form_scripts::ButtonAction as B;
+        let Some(id) = self.views.get(i).map(|v| v.id) else { return };
+        let Some(action) = self.session.field_action(id, name, widget, trigger) else { return };
+        let B::Script(js) = action else {
+            crate::canvas::run_button(self, i, name, action);
+            return;
+        };
+        if !self.session.javascript() {
+            return;
+        }
+        let draft = self.views.get(i).and_then(|v| v.forms.focus.as_ref()).map(|f| f.name.clone());
+        let before = draft
+            .as_ref()
+            .and_then(|e| self.session.get(id)?.form.iter().find(|f| &f.name == e).map(|f| (crate::forms_ui::draft_text(f), f.value.clone())));
+        let generation = self.session.get(id).map(|d| d.edit_generation());
+        match self.session.run_field_script(id, &js, Some(name), trigger) {
+            Ok(o) => {
+                if self.session.get(id).map(|d| d.edit_generation()) != generation
+                    && let Some(info) = self.session.get(id).map(|d| d.info.clone())
+                    && let Some(view) = self.views.get_mut(i)
+                {
+                    view.document_changed(&info);
+                    if let Some(before) = &before
+                        && let Some(draft) = view.forms.focus.as_mut()
+                        && let Some(f) = self.session.get(id).and_then(|d| d.form.iter().find(|f| f.name == draft.name))
+                    {
+                        crate::forms_ui::refresh_draft(draft, (&before.0, &before.1), (crate::forms_ui::draft_text(f), &f.value));
+                    }
+                }
+                let out = JsOutput {
+                    alerts: o.alerts,
+                    console: o.console,
+                    requests: o.requests,
+                    errors: o.error.into_iter().collect(),
+                    doc_errors: Vec::new(),
+                };
+                self.handle_js(id, out);
+            }
+            Err(e) => self.notify_fmt("{field}: {e}", &[("field", name), ("e", &e.to_string())]),
+        }
+    }
+
     /// Run a push button's JavaScript (its Mouse Up action).
     pub fn run_button_script(&mut self, id: DocId, field: &str, script: &str) {
         // A script reads the fields: include what's still being typed in one (#166).

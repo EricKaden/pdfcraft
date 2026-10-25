@@ -76,6 +76,16 @@ pub struct FormView {
     /// one it left runs its XFA exit scripts and the one it reached its enter scripts
     /// (`PdfCraftApp::run_focus_scripts`).
     pub(crate) focused: Option<(String, usize)>,
+    /// The field and widget under the pointer when it was last looked at, and the one this
+    /// frame's pages found under it: when they differ, the one left runs its Mouse Exit action
+    /// and the one reached its Mouse Enter (`PdfCraftApp::run_pointer_triggers`).
+    pub(crate) hovered: Option<(String, usize)>,
+    pub(crate) hover_seen: Option<(String, usize)>,
+    /// Mouse Down actions this frame's presses set off, run before what the press commits.
+    pub(crate) pressed_on: Vec<(String, usize)>,
+    /// Fields (not push buttons, whose click is `button`) a click released on: their Mouse Up
+    /// actions run once the focus scripts have, as another viewer orders them.
+    pub(crate) released_on: Vec<(String, usize)>,
 }
 
 /// A form message for the app to show, with document data kept separate so the visible
@@ -202,6 +212,7 @@ pub(crate) fn page_input(
             .map(|(i, w)| (f, i, w))
     });
     let Some((f, wi, w)) = hit else { return FieldPointer::Away };
+    view.forms.hover_seen = Some((f.name.clone(), wi));
     // The field's tooltip (`/TU`), as Acrobat shows it on hover (#3854). ISO 32000-2 Table 226
     // makes it the name the user interface identifies the field by.
     if let Some(tip) = f.tooltip.as_deref().filter(|t| !t.trim().is_empty()) {
@@ -221,6 +232,11 @@ pub(crate) fn page_input(
             _ => egui::CursorIcon::PointingHand,
         });
     }
+    // A press on a field that takes input runs its Mouse Down action first, before the field
+    // the focus leaves commits (another viewer's order).
+    if allowed && !f.read_only() && !w.read_only && resp.is_pointer_button_down_on() && ptr.pressed().is_some() {
+        view.forms.pressed_on.push((f.name.clone(), wi));
+    }
     // A text field opens on the press rather than the click, so a drag that starts on it
     // selects its text (#2213).
     let pressed = f.kind == FormFieldKind::Text && usable && resp.is_pointer_button_down_on() && ptr.pressed().is_some();
@@ -235,6 +251,9 @@ pub(crate) fn page_input(
     if !allowed {
         view.forms.notice = Some(FormNotice::Security);
         return FieldPointer::Owned;
+    }
+    if allowed && !f.read_only() && !w.read_only && f.kind != FormFieldKind::PushButton {
+        view.forms.released_on.push((f.name.clone(), wi));
     }
     match f.kind {
         _ if f.read_only() || w.read_only => view.forms.notice = Some(FormNotice::ReadOnly(f.name.clone())),

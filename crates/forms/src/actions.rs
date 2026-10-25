@@ -46,8 +46,20 @@ impl Trigger {
         Trigger::ALL.into_iter().find(|t| t.id() == id)
     }
 
+    /// `event.name` for a JavaScript action it runs, as another viewer names it.
+    pub fn event_name(self) -> &'static str {
+        match self {
+            Trigger::MouseUp => "Mouse Up",
+            Trigger::MouseDown => "Mouse Down",
+            Trigger::MouseEnter => "Mouse Enter",
+            Trigger::MouseExit => "Mouse Exit",
+            Trigger::OnFocus => "Focus",
+            Trigger::OnBlur => "Blur",
+        }
+    }
+
     /// The `/AA` key (`None`: Mouse Up lives in `/A`).
-    fn key(self) -> Option<&'static [u8]> {
+    pub(crate) fn key(self) -> Option<&'static [u8]> {
         match self {
             Trigger::MouseUp => None,
             Trigger::MouseDown => Some(b"D"),

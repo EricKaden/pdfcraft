@@ -9,7 +9,7 @@
 use pdfcraft_forms::{Field, FieldChange, FieldEvent, FieldKind, FieldProps, ScriptResult, Scripts};
 pub use pdfcraft_js::{Limits, Outcome, Panel, Request};
 
-use crate::{DocId, Edit, EditError, Session};
+use crate::{DocId, Edit, EditError, FieldTrigger, Session};
 
 /// A field gaining or losing focus ([`Session::field_focus`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -303,6 +303,22 @@ impl Session {
     /// the console (no target). Field changes and `resetForm` are applied as one undoable step;
     /// everything else the script asked for is returned.
     pub fn run_javascript(&mut self, id: DocId, script: &str, target: Option<&str>) -> Result<Outcome, EditError> {
+        self.run_field_script(id, script, target, FieldTrigger::MouseUp)
+    }
+
+    /// The action widget `widget` of field `name` in document `id` runs on `trigger` (ISO
+    /// 32000-2 Table 197), if it has one PdfCraft can read.
+    pub fn field_action(&self, id: DocId, name: &str, widget: usize, trigger: FieldTrigger) -> Option<crate::form_scripts::ButtonAction> {
+        let doc = self.get(id)?;
+        let cos = &doc.editor.as_ref()?.cos;
+        let field = doc.form.iter().find(|f| f.name == name)?;
+        pdfcraft_forms::widget_action(cos, field, widget, trigger)
+    }
+
+    /// [`Session::run_javascript`] for a field's action on `trigger`: the script sees the field
+    /// event that trigger names (`event.name` "Mouse Down", "Focus", …), and only Mouse Up runs a
+    /// laid-out XFA button's click script instead.
+    pub fn run_field_script(&mut self, id: DocId, script: &str, target: Option<&str>, trigger: FieldTrigger) -> Result<Outcome, EditError> {
         if self.js_off {
             return Err(EditError::Invalid("JavaScript is turned off (Preferences ▸ JavaScript)".into()));
         }
@@ -310,6 +326,7 @@ impl Session {
         let cos = doc.editor.as_ref().map(|e| e.cos.clone()).ok_or_else(|| EditError::ReadOnly(doc.read_only_reason.clone().unwrap_or_default()))?;
         // A button PdfCraft generated from an XFA template runs its XFA click script.
         if let Some(t) = target
+            && trigger == FieldTrigger::MouseUp
             && let Some(tpl) = doc.xfa_template.clone()
             && let Some(field) = doc.form.iter().find(|f| f.name == t)
             && let Some(som) = crate::xfa::clickable_som(&cos, &tpl, field)
@@ -329,7 +346,7 @@ impl Session {
         let fields = pdfcraft_forms::fields(&cos);
         let states: Vec<_> = fields.iter().map(|f| field_state(&cos, f)).collect();
         let event = match target {
-            Some(t) => pdfcraft_js::Event { will_commit: false, ..pdfcraft_js::Event::field("Mouse Up", t, "") },
+            Some(t) => pdfcraft_js::Event { will_commit: false, ..pdfcraft_js::Event::field(trigger.event_name(), t, "") },
             None => pdfcraft_js::Event::doc("Console"),
         };
         let mut o = pdfcraft_js::run(script, &event, &runner.doc, &states, &runner.doc_scripts, Limits::default());

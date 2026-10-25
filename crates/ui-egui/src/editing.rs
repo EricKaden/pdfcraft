@@ -260,6 +260,7 @@ impl PdfCraftApp {
         // After the queued edit: a value typed into the field the focus left has been taken (and
         // its change has run the field's exit) before the focus scripts run.
         self.run_focus_scripts(i);
+        self.run_release_triggers(i);
         if !applied {
             // Nor may a shortcut pressed with it (⌘S right after Enter) run behind the refusal.
             self.deferred_commands.clear();
@@ -488,9 +489,10 @@ impl PdfCraftApp {
         false
     }
 
-    /// XFA enter and exit scripts for where the focus went on tab `i` since it was last looked at,
-    /// however it moved (a click, Tab or Shift+Tab, Escape, a click on the page): the
-    /// field it left runs its exit, then the field it reached runs its enter. The engine skips an
+    /// XFA enter and exit scripts, and AcroForm On Blur and On Focus actions, for where the focus
+    /// went on tab `i` since it was last looked at, however it moved (a click, Tab or Shift+Tab,
+    /// Escape, a click on the page): the field it left runs its exit and its Blur, then the field
+    /// it reached runs its enter and its Focus. The engine skips an
     /// exit the field's committed change already ran. A tab that closes runs nothing: its
     /// document is going away, and a script changing it then would only ask to save it. A script
     /// that changes the field being edited (an enter clearing a placeholder) shows in its editor
@@ -511,6 +513,10 @@ impl PdfCraftApp {
             let before: Option<(String, Vec<String>)> = edited
                 .as_ref()
                 .and_then(|e| self.session.get(id)?.form.iter().find(|f| &f.name == e).map(|f| (crate::forms_ui::draft_text(f), f.value.clone())));
+            let trigger = match focus {
+                FieldFocus::Exit => pdfcraft_engine::FieldTrigger::OnBlur,
+                FieldFocus::Enter => pdfcraft_engine::FieldTrigger::OnFocus,
+            };
             match self.session.field_focus(id, &name, widget, focus) {
                 Ok(changed) => {
                     if changed
@@ -530,6 +536,9 @@ impl PdfCraftApp {
                 }
                 Err(e) => self.notify_error(e),
             }
+            // The widget's On Blur or On Focus action (an AcroForm's; laid-out XFA fields have
+            // none), after its XFA exit or enter.
+            self.run_field_trigger(i, &name, widget, trigger);
         }
     }
 
