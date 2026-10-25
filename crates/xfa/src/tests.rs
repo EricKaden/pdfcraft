@@ -3059,6 +3059,44 @@ fn date_fields_are_shown_through_their_display_picture() {
     assert_eq!(action("none", b"F"), r#"AFDate_FormatEx("dd/mm/yyyy");"#);
 }
 
+/// Taking the XFA out makes each date field one a static form keeps working: held and typed as
+/// it shows, as another viewer checks typing against the keystroke pattern but reads the value
+/// again in the format's. Its keystroke takes the format's pattern and its value (an ISO date in
+/// the layout) is written in it; the report counts the fields changed.
+#[test]
+fn taking_the_xfa_out_types_dates_as_they_show() {
+    use crate::pdf::strip;
+    let xdp = r##"<?xml version="1.0" encoding="UTF-8"?>
+<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/">
+<template xmlns="http://www.xfa.org/schema/xfa-template/3.3/">
+<subform name="form" layout="tb">
+ <pageSet><pageArea name="page"><contentArea x="0.5in" y="0.5in" w="7.5in" h="10in"/><medium short="8.5in" long="11in"/></pageArea></pageSet>
+ <field name="dayFirst" w="2in" h="0.3in"><ui><dateTimeEdit/><picture>date{DD/MM/YYYY}</picture></ui><value><date>2016-10-18</date></value><format><picture>date{MM/DD/YYYY}</picture></format></field>
+ <field name="same" w="2in" h="0.3in"><ui><dateTimeEdit/><picture>date{DD/MM/YYYY}</picture></ui><value><date>2016-10-18</date></value></field>
+</subform>
+</template>
+</xdp:xdp>
+"##;
+    let mut doc = Document::open(Arc::new(shell(xdp))).unwrap();
+    render_into(&mut doc).unwrap();
+    let r = strip(&mut doc).unwrap();
+    assert_eq!(r.date_fields, 2, "{r:?}");
+    assert!(r.notes().iter().any(|n| n.contains("2 date field(s)")), "{:?}", r.notes());
+    let fields = pdfcraft_forms_free_fields(&doc);
+    let field = |n: &str| fields.iter().find(|(name, _)| name == n).map(|(_, d)| d.clone()).unwrap();
+    let action = |n: &str, k: &[u8]| {
+        let aa = doc.resolve(field(n).get(b"AA").unwrap()).as_dict().unwrap().clone();
+        let a = doc.resolve(aa.get(k).unwrap()).as_dict().unwrap().clone();
+        doc.resolve(a.get(b"JS").unwrap()).as_string().unwrap().to_text()
+    };
+    let value = |n: &str| doc.resolve(field(n).get(b"V").unwrap()).as_string().unwrap().to_text();
+    assert_eq!(action("dayFirst", b"K"), r#"AFDate_KeystrokeEx("mm/dd/yyyy");"#);
+    assert_eq!(action("dayFirst", b"F"), r#"AFDate_FormatEx("mm/dd/yyyy");"#);
+    assert_eq!(value("dayFirst"), "10/18/2016");
+    assert!(!field("dayFirst").contains(DATE_KEY), "the private mark goes as before");
+    assert_eq!((action("same", b"K"), value("same")), (r#"AFDate_KeystrokeEx("dd/mm/yyyy");"#.to_string(), "18/10/2016".to_string()));
+}
+
 /// The terminal fields by full name, down the field tree.
 fn full_names(doc: &Document) -> Vec<(String, Dict)> {
     let root = doc.get(doc.root().unwrap());
