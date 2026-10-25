@@ -218,7 +218,11 @@ pub(crate) fn page_input(
             .map(|(i, w)| (f, i, w))
     });
     let Some((f, wi, w)) = hit else { return FieldPointer::Away };
-    view.forms.hover_seen = Some((f.name.clone(), wi));
+    // Its Mouse Enter and Exit actions run where the form may be filled in, as its other
+    // actions do: elsewhere a script changing a value would only be refused, on every pass.
+    if allowed {
+        view.forms.hover_seen = Some((f.name.clone(), wi));
+    }
     // The field's tooltip (`/TU`), as Acrobat shows it on hover (#3854). ISO 32000-2 Table 226
     // makes it the name the user interface identifies the field by.
     if let Some(tip) = f.tooltip.as_deref().filter(|t| !t.trim().is_empty()) {
