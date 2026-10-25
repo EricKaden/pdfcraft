@@ -904,20 +904,41 @@ pub(crate) fn relayout_changed_text(
 /// and again whenever a later script lays the form out again ([`Runner::finish`]).
 pub(crate) fn on_open(doc: &mut pdfcraft_cos::Document, tpl: &Template, run: &mut XfaRun) -> Result<Changes, String> {
     let mut r = Runner::new(doc, tpl, run, OPEN_BUDGET_MS);
-    let initialize = r.events_named("initialize");
-    for ev in &children_first(initialize) {
+    let initialize = children_first(r.events_named("initialize"));
+    for ev in &initialize {
         r.run(ev, "")?;
     }
-    // `ready` without `ref="$layout"` is form:ready.
-    for ev in &r.events_named("ready") {
+    // The calculations, before form:ready (XFA 3.3 fires the form ready event once they have run;
+    // another viewer runs them there too).
+    r.calculates()?;
+    let calculated = r.field_changes.clone();
+    // `ready` without `ref="$layout"` is form:ready: in the reverse of initialize's order, the
+    // root first and the objects inside it last to first, as another viewer runs it.
+    for ev in &objects_reversed(children_first(r.events_named("ready"))) {
         r.run(ev, "")?;
     }
     r.layout_ready()?;
     for ev in &r.events_named("docReady") {
         r.run(ev, "")?;
     }
-    r.calculates()?;
+    // A ready script wrote a value: the calculations run again, as after any change (which of
+    // them read it isn't known here, so all of them).
+    if r.field_changes != calculated {
+        r.calculates()?;
+    }
     r.finish()
+}
+
+/// `events` with their objects in the reverse order, each object's own events keeping theirs.
+fn objects_reversed(events: Vec<ScriptEvent>) -> Vec<ScriptEvent> {
+    let mut objects: Vec<Vec<ScriptEvent>> = Vec::new();
+    for ev in events {
+        match objects.last_mut() {
+            Some(last) if last.first().is_some_and(|e| e.som == ev.som) => last.push(ev),
+            _ => objects.push(vec![ev]),
+        }
+    }
+    objects.into_iter().rev().flatten().collect()
 }
 
 /// `events` (in document order) reordered so that each object's come after those of the objects

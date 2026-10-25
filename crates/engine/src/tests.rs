@@ -8489,6 +8489,53 @@ fn ready_events_run_in_order_and_layout_ready_runs_again_after_a_new_layout() {
     assert_eq!(log(&s), format!("{opened}|root layout:ready pages=2|title layout:ready"));
 }
 
+/// On opening, the calculations run once the initialize scripts have, before form:ready (XFA
+/// 3.3 fires the form ready event after them), and form:ready runs in the reverse of
+/// initialize's order (the root, then its fields last to first), while layout:ready keeps
+/// document order, as another viewer logged on a synthetic form. Since the ready scripts wrote a
+/// value (the log), the calculations run once more after them: which ones read it isn't known
+/// here. A form whose ready scripts write nothing runs them once.
+#[test]
+fn calculations_run_before_form_ready_which_runs_in_reverse() {
+    let js = |what: &str| {
+        format!(r#"var l = xfa.form.form.log; l.rawValue = (l.rawValue == null || l.rawValue == "" ? "" : l.rawValue + "|") + "{what}";"#)
+    };
+    let event = |activity: &str, reference: &str, what: &str| {
+        format!(r#"<event activity="{activity}"{reference}><script contentType="application/x-javascript">{}</script></event>"#, js(what))
+    };
+    let field = |name: &str, extra: &str| {
+        format!(
+            r#"<field name="{name}" w="2in" h="0.3in"><ui><textEdit/></ui>{}{}{extra}</field>"#,
+            event("initialize", "", &format!("{name} initialize")),
+            event("ready", r#" ref="$form""#, &format!("{name} form:ready")),
+        )
+    };
+    let calc = format!(r#"<calculate><script contentType="application/x-javascript">{} 42;</script></calculate>"#, js("calc calculate"));
+    let layout = |name: &str| event("ready", r#" ref="$layout""#, &format!("{name} layout:ready"));
+    let fields = [field("calc", &calc), field("a", &layout("a")), field("b", &layout("b"))].concat();
+    let xdp = pdfcraft_xfa::fixtures::ready_events_template().replace(r#" <field name="grow""#, &format!(" {fields}\n <field name=\"grow\""));
+    let mut s = Session::new();
+    let id = s.open("ready.pdf", None, Arc::new(pdfcraft_xfa::fixtures::shell(&xdp)), None).expect("opens");
+    let value = |s: &Session, n: &str| s.get(id).unwrap().form.iter().find(|f| f.name == n).map(|f| f.value.join("")).unwrap_or_default();
+    let initialize = "title initialize|calc initialize|a initialize|b initialize|root initialize";
+    let ready = "root form:ready|b form:ready|a form:ready|calc form:ready|title form:ready";
+    let layout = "root layout:ready pages=1|title layout:ready|a layout:ready|b layout:ready";
+    assert_eq!(value(&s, "log"), format!("{initialize}|calc calculate|{ready}|{layout}|root docReady|calc calculate"));
+    assert_eq!(value(&s, "calc"), "42");
+    // Ready scripts that write nothing: the calculations run once, before form:ready.
+    let mut quiet = xdp.clone();
+    for start in
+        [r#"<event activity="ready" ref="$form">"#, r#"<event activity="ready" ref="$layout">"#, r#"<event activity="docReady" ref="$host">"#]
+    {
+        // Each ready script writes nothing; its logging moves to an event that never fires.
+        quiet =
+            quiet.replace(start, &format!(r#"{start}<script contentType="application/x-javascript">1;</script></event><event activity="never">"#));
+    }
+    let id = s.open("quiet.pdf", None, Arc::new(pdfcraft_xfa::fixtures::shell(&quiet)), None).expect("opens");
+    let log = s.get(id).unwrap().form.iter().find(|f| f.name == "log").map(|f| f.value.join("")).unwrap_or_default();
+    assert_eq!(log.matches("calc calculate").count(), 1, "{log}");
+}
+
 /// An edit's two script runtimes share one field highlight: a change an XFA script makes reaches
 /// the field scripts' runner, and one the field scripts make is what the next XFA script reads.
 #[test]
