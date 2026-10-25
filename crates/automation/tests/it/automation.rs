@@ -7387,6 +7387,46 @@ fn xfa_focus_scripts_run_through_form_focus() {
     }
 }
 
+/// form_focus refuses a field with no widget, which nothing can focus, instead of reporting a
+/// focus change that ran nothing.
+#[test]
+fn form_focus_refuses_a_field_with_no_widget() {
+    let dir = workdir("focus-no-widget");
+    let objs = [
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [4 0 R 5 0 R] >> >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 300 400] >>",
+        "<< /Type /Page /Parent 2 0 R /Annots [4 0 R] >>",
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (name) /Rect [60 60 200 80] /P 3 0 R >>",
+        "<< /FT /Tx /T (total) /V (3) >>",
+    ];
+    let mut bytes = b"%PDF-1.7\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, o) in objs.iter().enumerate() {
+        offsets.push(bytes.len());
+        bytes.extend_from_slice(format!("{} 0 obj\n{o}\nendobj\n", i + 1).as_bytes());
+    }
+    let xref = bytes.len();
+    bytes.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+    for o in offsets {
+        bytes.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    bytes.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
+    std::fs::write(dir.join("total.pdf"), bytes).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "total.pdf" }))["doc"].as_u64().unwrap();
+    let fields = ok(&mut a, "form_fields", json!({ "doc": doc }));
+    assert!(fields["fields"].as_array().unwrap().iter().any(|f| f["name"] == "total"), "the field without a widget is listed: {fields}");
+    for args in [json!({ "doc": doc, "field": "total", "event": "enter" }), json!({ "doc": doc, "field": "total", "event": "enter", "widget": 1 })] {
+        let e = err(&mut a, "form_focus", args.clone()).to_string();
+        assert!(e.contains("\"total\" has no widget to focus"), "{args}: {e}");
+    }
+    assert_eq!(
+        ok(&mut a, "form_focus", json!({ "doc": doc, "field": "name", "event": "enter" }))["changed"],
+        false,
+        "a field with a widget still takes it"
+    );
+}
+
 /// XFA scripts run through the tools: initialize and calculate on opening, calculations after
 /// form_fill, and a button's click script through js_run, adding a row that undo takes away.
 #[test]
