@@ -310,6 +310,7 @@ impl Session {
         if self.js_off {
             return Ok(None);
         }
+        let time_scale = self.xfa_time_scale.unwrap_or(1);
         let doc = self.doc_mut(id)?;
         let Some(tpl) = doc.xfa_template.clone() else { return Ok(None) };
         let Some(cos) = doc.editor.as_ref().map(|e| &e.cos) else { return Ok(None) };
@@ -318,7 +319,7 @@ impl Session {
             return Ok(None);
         }
         let mut out = JsOutput::default();
-        let mut run = crate::xfa::XfaRun { page_count: doc.info.pages.len(), out: &mut out, datasets: None, ran_away: false };
+        let mut run = crate::xfa::XfaRun { page_count: doc.info.pages.len(), out: &mut out, datasets: None, ran_away: false, time_scale };
         let entered = crate::guard(|| crate::xfa::keystroke(cos, &tpl, &som, ks, &mut run))
             .unwrap_or_else(|m| Err(format!("the form's scripts failed unexpectedly ({m})")));
         let ran_away = run.ran_away;
