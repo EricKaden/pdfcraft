@@ -108,6 +108,12 @@ fn fillable(f: &FormField) -> bool {
     !f.read_only() && !matches!(f.kind, FormFieldKind::PushButton | FormFieldKind::Signature)
 }
 
+/// Whether the field takes the focus, on a click and as a Tab stop: one that can be filled in,
+/// or a push button, as another viewer gives it the focus and a Tab stop too.
+fn takes_focus(f: &FormField) -> bool {
+    fillable(f) || (f.kind == FormFieldKind::PushButton && !f.read_only())
+}
+
 /// Whether a combo box takes typed text as well as a choice from its list: the Edit flag
 /// (ISO 32000-2 Table 233), which only means something with Combo set.
 fn editable_combo(f: &FormField) -> bool {
@@ -257,10 +263,18 @@ pub(crate) fn page_input(
     }
     match f.kind {
         _ if f.read_only() || w.read_only => view.forms.notice = Some(FormNotice::ReadOnly(f.name.clone())),
-        FormFieldKind::PushButton => match &f.button {
-            Some(a) => view.forms.button = Some((f.name.clone(), a.clone())),
-            None => view.forms.notice = Some(FormNotice::NoAction(f.name.clone())),
-        },
+        FormFieldKind::PushButton => {
+            // The button takes the focus, as a check box does: what it leaves commits and blurs
+            // first, and Tab goes on from it.
+            if view.forms.focus.as_ref().is_none_or(|x| x.name != f.name || x.widget != wi) {
+                commit(view, form);
+                view.forms.focus = Some(open_focus(f, wi));
+            }
+            match &f.button {
+                Some(a) => view.forms.button = Some((f.name.clone(), a.clone())),
+                None => view.forms.notice = Some(FormNotice::NoAction(f.name.clone())),
+            }
+        }
         FormFieldKind::Signature => view.sign.field = Some(f.name.clone()),
         FormFieldKind::CheckBox | FormFieldKind::Radio => {
             // The box takes the focus, as in Acrobat, so Tab goes on from it (#2223). The overlay
@@ -875,25 +889,26 @@ pub(crate) fn overlay(
                 close = true;
             }
         }
-        FormFieldKind::CheckBox | FormFieldKind::Radio => {
-            // Nothing is drawn over the box, but a widget there holds egui's keyboard focus, so
-            // Space, Tab and the arrows come here instead of turning or scrolling the page.
-            let id = egui::Id::new(("form-field", view.id.0, &f.name, focus.widget));
-            let mut has_focus = false;
-            // Not interactable, so clicks still reach the page under it.
-            let area = egui::Area::new(egui::Id::new(("form-toggle", view.id.0))).order(egui::Order::Foreground).interactable(false);
-            area.fixed_pos(rect.min).show(ctx, |ui| {
-                let r = ui.interact(rect, id, egui::Sense::focusable_noninteractive());
-                if let Some(fx) = view.forms.focus.as_mut()
-                    && std::mem::take(&mut fx.request_focus)
-                {
-                    r.request_focus();
+        FormFieldKind::PushButton => {
+            let has_focus = hold_keys(ctx, view, f, focus.widget, rect);
+            let (esc, tab, shift) = ctx.input(|i| (i.key_pressed(egui::Key::Escape), i.key_pressed(egui::Key::Tab), i.modifiers.shift));
+            // Space or Enter presses the focused button, as a click's release does.
+            let press = has_focus
+                && ctx
+                    .input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Space) || i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+            if esc || clicked_outside() {
+                close = true;
+            } else if tab {
+                next = Some(!shift);
+            } else if press {
+                match &f.button {
+                    Some(a) => view.forms.button = Some((f.name.clone(), a.clone())),
+                    None => view.forms.notice = Some(FormNotice::NoAction(f.name.clone())),
                 }
-                let filter = egui::EventFilter { tab: true, horizontal_arrows: true, vertical_arrows: true, escape: false };
-                ui.memory_mut(|m| m.set_focus_lock_filter(id, filter));
-                has_focus = r.has_focus();
-            });
-            view.forms.keys = Some((id, f.kind == FormFieldKind::Radio));
+            }
+        }
+        FormFieldKind::CheckBox | FormFieldKind::Radio => {
+            let has_focus = hold_keys(ctx, view, f, focus.widget, rect);
             let (esc, tab, shift) = ctx.input(|i| (i.key_pressed(egui::Key::Escape), i.key_pressed(egui::Key::Tab), i.modifiers.shift));
             let space = has_focus && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Space));
             let arrow = has_focus && f.kind == FormFieldKind::Radio;
@@ -945,11 +960,12 @@ pub(crate) fn overlay(
     if let Some(forward) = next {
         commit(view, form);
         let pending = view.pending_edit.take();
-        // The next field that can be filled in, check boxes and radio buttons included (#2223), in
-        // the document's tab order (each page's /Tabs: rows, columns or structure), wrapping.
+        // The next field that takes the focus, check boxes, radio buttons (#2223) and push buttons
+        // included, in the document's tab order (each page's /Tabs: rows, columns or structure),
+        // wrapping.
         let mut order: Vec<(usize, &FormField, usize)> = form
             .iter()
-            .filter(|x| fillable(x))
+            .filter(|x| takes_focus(x))
             .flat_map(|x| x.widgets.iter().enumerate().filter(|(_, w)| w.page.is_some() && !w.hidden).map(move |(wi, w)| (w.tab, x, wi)))
             .collect();
         order.sort_by_key(|o| o.0);
@@ -970,6 +986,30 @@ pub(crate) fn overlay(
         edit = edit.or(pending);
     }
     edit.or_else(|| view.pending_edit.take())
+}
+
+/// For a focused check box, radio button or push button: nothing is drawn over it, but a widget
+/// there holds egui's keyboard focus, so Space, Tab and the arrows come to the field instead of
+/// turning or scrolling the page (radio buttons take the arrows). Returns whether it has the
+/// focus.
+fn hold_keys(ctx: &egui::Context, view: &mut DocView, f: &FormField, widget: usize, rect: Rect) -> bool {
+    let id = egui::Id::new(("form-field", view.id.0, &f.name, widget));
+    let mut has_focus = false;
+    // Not interactable, so clicks still reach the page under it.
+    let area = egui::Area::new(egui::Id::new(("form-toggle", view.id.0))).order(egui::Order::Foreground).interactable(false);
+    area.fixed_pos(rect.min).show(ctx, |ui| {
+        let r = ui.interact(rect, id, egui::Sense::focusable_noninteractive());
+        if let Some(fx) = view.forms.focus.as_mut()
+            && std::mem::take(&mut fx.request_focus)
+        {
+            r.request_focus();
+        }
+        let filter = egui::EventFilter { tab: true, horizontal_arrows: true, vertical_arrows: true, escape: false };
+        ui.memory_mut(|m| m.set_focus_lock_filter(id, filter));
+        has_focus = r.has_focus();
+    });
+    view.forms.keys = Some((id, f.kind == FormFieldKind::Radio));
+    has_focus
 }
 
 /// Where a field's widget is on screen (tests and automation).

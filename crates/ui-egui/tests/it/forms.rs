@@ -1532,9 +1532,9 @@ fn a_form_button_shows_and_hides_the_attachments_panel() {
 /// A field's mouse and focus actions (ISO 32000-2 Table 197) run as the pointer and the focus
 /// move, in the order another viewer runs them on a synthetic form: hovering runs Mouse Enter and
 /// Exit; a click runs Mouse Down, then what the field left commits and its Blur, then Focus, then
-/// Mouse Up; Tab runs Blur and Focus. A push button, which doesn't take the focus here, runs
-/// Mouse Down, then the Blur of the field left, then its click (Mouse Up); a check box, which takes
-/// the focus on the release, runs its Mouse Up after that Focus.
+/// Mouse Up; Tab runs Blur and Focus, and reaches the push button. A push button and a check box
+/// take the focus on a click like a text field (a click on the field that has it runs only Mouse
+/// Down and Up), and Space presses the focused button.
 #[test]
 fn a_fields_mouse_and_focus_actions_run_in_another_viewers_order() {
     let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(|_cc| {
@@ -1586,20 +1586,21 @@ fn a_fields_mouse_and_focus_actions_run_in_another_viewers_order() {
     let before = log(&h).len();
     h.key_press(egui::Key::Tab);
     h.run_steps(3);
-    assert_eq!(log(&h).get(before..).unwrap_or_default(), "|b Blur|cb Focus", "Tab, to the check box (push buttons take no Tab stop here)");
+    assert_eq!(log(&h).get(before..).unwrap_or_default(), "|b Blur|btn Focus", "Tab, to the push button");
+    let step = |h: &mut Harness<'static, PdfCraftApp>, name: &str, expected: &str, what: &str| {
+        let before = log(h).len();
+        let p = at(h, name);
+        click(h, p);
+        assert_eq!(log(h).get(before..).unwrap_or_default(), expected, "{what}");
+    };
+    step(&mut h, "btn", "|b Mouse Exit|btn Mouse Enter|btn Mouse Down|btn Mouse Up", "the push button that has the focus");
+    step(&mut h, "cb", "|btn Mouse Exit|cb Mouse Enter|cb Mouse Down|btn Blur|cb Focus|cb Mouse Up", "the check box, from the button");
+    step(&mut h, "a", "|cb Mouse Exit|a Mouse Enter|a Mouse Down|cb Blur|a Focus|a Mouse Up", "back in a");
+    step(&mut h, "btn", "|a Mouse Exit|btn Mouse Enter|btn Mouse Down|a Blur|btn Focus|btn Mouse Up", "the push button, from a");
     let before = log(&h).len();
-    let p = at(&h, "btn");
-    click(&mut h, p);
-    assert_eq!(
-        log(&h).get(before..).unwrap_or_default(),
-        "|b Mouse Exit|btn Mouse Enter|btn Mouse Down|cb Blur|btn Mouse Up",
-        "from b to the push button"
-    );
-    // A check box takes the focus on the release, so its Mouse Up waits for that Focus.
-    let before = log(&h).len();
-    let p = at(&h, "cb");
-    click(&mut h, p);
-    assert_eq!(log(&h).get(before..).unwrap_or_default(), "|btn Mouse Exit|cb Mouse Enter|cb Mouse Down|cb Focus|cb Mouse Up", "the check box");
+    h.key_press(egui::Key::Space);
+    h.run_steps(3);
+    assert_eq!(log(&h).get(before..).unwrap_or_default(), "|btn Mouse Up", "Space presses the focused button");
 }
 
 /// Off a click, a field's action may not run a menu item: hovering a field whose Mouse Enter
