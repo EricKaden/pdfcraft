@@ -150,6 +150,15 @@ impl PdfCraftApp {
                 self.js_console.log.push(format!("{name}: its {} action only runs on a click", trigger.label()));
                 return;
             }
+            // A reset or show/hide applies now, and leaves the edit already queued (the text the
+            // press committed) to apply after it, in another viewer's order, and the field being
+            // edited open: a push button's click closes it first, a trigger doesn't.
+            if matches!(action, B::Reset { .. } | B::ShowHide { .. }) {
+                if let Some(edit) = crate::canvas::action_edit(self, i, &action) {
+                    self.apply_edit(edit);
+                }
+                return;
+            }
             crate::canvas::run_button(self, i, name, action);
             return;
         };
