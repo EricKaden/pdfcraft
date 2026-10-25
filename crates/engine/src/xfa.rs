@@ -130,6 +130,10 @@ pub(crate) struct XfaRun<'a> {
     pub ran_away: bool,
     /// Whether the viewer highlights form fields, for `app.runtimeHighlight`.
     pub highlight: bool,
+    /// What every time limit of the scripts is multiplied by (the event's budget, the engine's
+    /// start and each script's own): 1, unless the session was given another
+    /// ([`crate::Session::with_xfa_time_scale`]).
+    pub time_scale: u32,
 }
 
 /// The live form node `n`, with its descendants, as the script engine's snapshot of it.
@@ -297,6 +301,7 @@ impl<'a, 'b> Runner<'a, 'b> {
     fn new(doc: &'a mut pdfcraft_cos::Document, tpl: &'a Template, run: &'a mut XfaRun<'b>, budget_ms: u64) -> Self {
         let data = pdfcraft_xfa::data_of(doc);
         let ov = pdfcraft_xfa::overrides(doc);
+        let budget_ms = budget_ms.saturating_mul(u64::from(run.time_scale));
         Runner {
             doc,
             tpl,
@@ -333,7 +338,8 @@ impl<'a, 'b> Runner<'a, 'b> {
     /// The script engine for this event.
     fn session(&mut self) -> &mut XfaSession {
         let doc_info = XfaDoc { file_name: String::new(), page: 0, page_count: self.run.page_count, highlight: self.run.highlight };
-        self.session.get_or_insert_with(|| XfaSession::new(doc_info))
+        let scale = self.run.time_scale;
+        self.session.get_or_insert_with(|| XfaSession::new(doc_info).with_time_scale(scale))
     }
 
     /// Give the object at `som` the value `text` in the data and in the live form (refreshed
@@ -698,7 +704,7 @@ impl<'a, 'b> Runner<'a, 'b> {
             event,
             root,
             limits: limits_for(&ev.activity),
-            timeout: timeout_for(&ev.activity),
+            timeout: timeout_for(&ev.activity).saturating_mul(self.run.time_scale),
         };
         let o = self.session().run(script);
         if o.abandoned {
@@ -1017,7 +1023,7 @@ pub(crate) fn on_event(doc: &mut pdfcraft_cos::Document, tpl: &Template, som: &s
         r.run(&ev, "")?;
     }
     // The calculations that follow get a budget of their own.
-    r.clock = Clock::start(OPEN_BUDGET_MS);
+    r.clock = Clock::start(OPEN_BUDGET_MS.saturating_mul(u64::from(r.run.time_scale)));
     r.calculates()?;
     r.finish().map(|_| ())
 }
