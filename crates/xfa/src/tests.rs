@@ -3125,11 +3125,12 @@ fn template_default_dates_are_held_in_the_edit_pattern() {
     render_into(&mut doc).unwrap();
     strip(&mut doc).unwrap();
     let fields = pdfcraft_forms_free_fields(&doc);
-    let value = |n: &str| {
+    let value = |n: &str, key: &[u8]| {
         let d = fields.iter().find(|(name, _)| name == n).map(|(_, d)| d.clone()).unwrap();
-        doc.resolve(d.get(b"V").unwrap()).as_string().unwrap().to_text()
+        doc.resolve(d.get(key).unwrap()).as_string().unwrap().to_text()
     };
-    assert_eq!(value("swapped"), "10/11/2016", "still October 11 once static");
+    assert_eq!(value("swapped", b"V"), "10/11/2016", "still October 11 once static");
+    assert_eq!(value("swapped", b"DV"), "10/11/2016", "and so is its default");
 }
 
 /// The terminal fields by full name, down the field tree.
