@@ -302,17 +302,12 @@ impl Session {
         // Where the focus is now: a check box or radio group set while it has the focus runs its
         // exit scripts when it loses it, not with the change.
         doc.xfa_focus = (focus == FieldFocus::Enter).then(|| som.clone());
-        let group = if crossing { crate::xfa::exclusion_group_of(cos, &tpl, &som) } else { None };
-        let order: Vec<String> = match focus {
-            FieldFocus::Enter => group.into_iter().chain(std::iter::once(som)).collect(),
-            FieldFocus::Exit => std::iter::once(som).chain(group).collect(),
-        };
         // Which of them run, decided before any does: each edit forgets the exits a value's
         // change ran. Gaining focus starts afresh; losing it runs an exit unless the change just did.
         let mut run = Vec::new();
-        for som in order {
+        for (som, has) in crate::xfa::focus_targets(cos, &tpl, &som, activity, crossing) {
             let ran = doc.xfa_exited.remove(&som);
-            if crate::xfa::has_event(cos, &tpl, &som, activity) && !(ran && focus == FieldFocus::Exit) {
+            if has && !(ran && focus == FieldFocus::Exit) {
                 run.push(som);
             }
         }

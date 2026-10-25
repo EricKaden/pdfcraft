@@ -1029,17 +1029,28 @@ pub(crate) fn widget_som(doc: &pdfcraft_cos::Document, field: &pdfcraft_forms::F
     som_of(w.obj).or_else(|| som_of(field.obj))
 }
 
-/// The SOM path of the exclusion group the field at `som` is a button of, if it is one.
-pub(crate) fn exclusion_group_of(doc: &pdfcraft_cos::Document, tpl: &Template, som: &str) -> Option<String> {
-    let (parent, _) = som.rsplit_once('.')?;
+/// The objects whose `activity` scripts (`enter` or `exit`) run as the focus reaches or leaves the
+/// field at `som`, in that order, read from one build of the live form. With `crossing`, the
+/// radio group `som` is a button of comes first on enter and last on exit. Each comes with
+/// whether the live form gives it such a script.
+pub(crate) fn focus_targets(doc: &pdfcraft_cos::Document, tpl: &Template, som: &str, activity: &str, crossing: bool) -> Vec<(String, bool)> {
     let live = pdfcraft_xfa::form_tree(tpl, pdfcraft_xfa::data_of(doc).as_ref(), &pdfcraft_xfa::overrides(doc));
-    find_container(&live.root, parent, 0).filter(|n| n.kind == Some(NodeKind::ExclGroup)).map(|n| n.som.clone())
-}
-
-/// Does the live form give SOM path `som` an `activity` script?
-pub(crate) fn has_event(doc: &pdfcraft_cos::Document, tpl: &Template, som: &str, activity: &str) -> bool {
-    let live = pdfcraft_xfa::form_tree(tpl, pdfcraft_xfa::data_of(doc).as_ref(), &pdfcraft_xfa::overrides(doc));
-    live.events.iter().any(|e| e.som == som && e.activity == activity)
+    let group = som
+        .rsplit_once('.')
+        .filter(|_| crossing)
+        .and_then(|(parent, _)| find_container(&live.root, parent, 0))
+        .filter(|n| n.kind == Some(NodeKind::ExclGroup))
+        .map(|n| n.som.clone());
+    let field = Some(som.to_string());
+    let order = if activity == "enter" { [group, field] } else { [field, group] };
+    order
+        .into_iter()
+        .flatten()
+        .map(|at| {
+            let has = live.events.iter().any(|e| e.som == at && e.activity == activity);
+            (at, has)
+        })
+        .collect()
 }
 
 /// The SOM path of a generated field whose template has a click script.
