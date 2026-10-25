@@ -161,12 +161,17 @@ fn to_js(n: &FormNode) -> XfaNode {
     }
 }
 
-/// Whether the live form has a field at `som`.
-fn is_field(n: &FormNode, som: &str, depth: usize) -> bool {
+/// The SOM paths of the live form's fields under `n`, at most 64 levels deep, into `out`.
+fn field_soms(n: &FormNode, out: &mut HashSet<String>, depth: usize) {
     if depth > 64 {
-        return false;
+        return;
     }
-    (n.som == som && n.kind == Some(NodeKind::Field)) || n.children.iter().any(|c| is_field(c, som, depth + 1))
+    if n.kind == Some(NodeKind::Field) {
+        out.insert(n.som.clone());
+    }
+    for c in &n.children {
+        field_soms(c, out, depth + 1);
+    }
 }
 
 /// The subform or other container at SOM path `som` in the live form under `n` (fields are
@@ -785,9 +790,12 @@ impl<'a, 'b> Runner<'a, 'b> {
         let (ready, numbered) = {
             let live = self.live();
             let ready: Vec<ScriptEvent> = live.events.iter().filter(|e| e.activity == "layoutReady").cloned().collect();
+            // The fields, gathered in one walk rather than one per script.
+            let mut fields = HashSet::new();
+            field_soms(&live.root, &mut fields, 0);
             let numbered: HashSet<String> = ready
                 .iter()
-                .filter(|e| pdfcraft_xfa::numbers_pages(&e.script, e.formcalc) && is_field(&live.root, &e.som, 0))
+                .filter(|e| fields.contains(&e.som) && pdfcraft_xfa::numbers_pages(&e.script, e.formcalc))
                 .map(|e| e.som.clone())
                 .collect();
             (ready, numbered)
