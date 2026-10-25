@@ -3189,8 +3189,6 @@ fn a_signed_box_in_the_root_subform_keeps_its_picture_through_a_new_layout() {
     assert!(matches!(&*doc.get(sig), Object::Dict(_)), "and the signature");
 }
 
-/// A signature box the file already holds a signature for shows that signature, the file's own
-/// objects, and is locked; the other box stays unsigned.
 /// A field of the same pass keeps a signature field named by its SOM path from repeating its
 /// name, written before the box or after it: with a text field named `form[0]` (as a hostile
 /// template may name one), the box keeps its own name and no two fields share one.
@@ -3222,6 +3220,8 @@ fn a_signature_field_does_not_repeat_a_name_another_field_has() {
     }
 }
 
+/// A signature box the file already holds a signature for shows that signature, the file's own
+/// objects, and is locked; the other box stays unsigned.
 #[test]
 fn a_signed_signature_box_shows_the_signature_the_file_holds() {
     let mut doc = Document::open(Arc::new(crate::fixtures::signed_shell())).unwrap();
