@@ -86,6 +86,9 @@ pub struct FormView {
     /// Fields (not push buttons, whose click is `button`) a click released on: their Mouse Up
     /// actions run once the focus scripts have, as another viewer orders them.
     pub(crate) released_on: Vec<(String, usize)>,
+    /// The primary button went down in the open field editor (not on the page, which saw the
+    /// press that opened it): its release over the field is that field's Mouse Up.
+    pub(crate) editor_press: bool,
 }
 
 /// A form message for the app to show, with document data kept separate so the visible
@@ -763,6 +766,21 @@ pub(crate) fn overlay(
                         laid_out = Some((out.galley, out.galley_pos));
                         out.response.response
                     });
+                    // A press in the open editor is a press on its field, whose Mouse Down runs, and
+                    // the release that follows over the field its Mouse Up, as another viewer runs
+                    // both for a click on the field being edited. (The press that opened the
+                    // editor went to the page, which queued them already.)
+                    let (pressed_here, released) = ui.input(|i| (i.pointer.primary_pressed(), i.pointer.primary_released()));
+                    if pressed_here && r.is_pointer_button_down_on() {
+                        view.forms.pressed_on.push((f.name.clone(), focus.widget));
+                        view.forms.editor_press = true;
+                    }
+                    if released
+                        && std::mem::take(&mut view.forms.editor_press)
+                        && ui.input(|i| i.pointer.interact_pos()).is_some_and(|p| rect.contains(p))
+                    {
+                        view.forms.released_on.push((f.name.clone(), focus.widget));
+                    }
                     if let (Some(tb), Some(before)) = (text_box, before)
                         && fx.text != before
                     {

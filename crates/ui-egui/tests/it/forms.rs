@@ -1529,6 +1529,53 @@ fn a_form_button_shows_and_hides_the_attachments_panel() {
     assert_eq!(h.state().right, None);
 }
 
+/// A click in the field being edited runs its Mouse Down and Mouse Up, and nothing else (no
+/// Blur or Focus), as another viewer runs them on a synthetic form; a press there that drags
+/// to select text runs them too, the Mouse Up as the button comes up over the field.
+#[test]
+fn a_click_in_the_field_being_edited_runs_its_mouse_down_and_up() {
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(|_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("triggers.pdf", None, pdfcraft_engine::form_fixtures::trigger_form()).unwrap();
+        app.set_option("left", "closed").unwrap();
+        app.set_option("zoom", "100").unwrap();
+        app
+    });
+    crate::support::settle(&mut h);
+    let log = |h: &Harness<'static, PdfCraftApp>| value(h, "log").first().cloned().unwrap_or_default();
+    let p = {
+        let s = h.state();
+        let doc = s.session.get(s.views[0].id).unwrap();
+        let f = doc.form.iter().find(|f| f.name == "a").unwrap();
+        pdfcraft_ui_egui::forms_ui::field_screen_rect(&s.views[0], &doc.info, f, 0).expect("on screen").center()
+    };
+    let release = |h: &mut Harness<'static, PdfCraftApp>, pos: egui::Pos2| {
+        h.event(egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE });
+        h.run_steps(3);
+    };
+    h.hover_at(p);
+    h.run_steps(1);
+    h.drag_at(p);
+    h.run_steps(1);
+    release(&mut h, p);
+    assert_eq!(log(&h), "a Mouse Enter|a Mouse Down|a Focus|a Mouse Up", "the click that opens it");
+    // Again, in the editor now open over it.
+    h.drag_at(p);
+    h.run_steps(1);
+    release(&mut h, p);
+    assert_eq!(log(&h), "a Mouse Enter|a Mouse Down|a Focus|a Mouse Up|a Mouse Down|a Mouse Up", "a click in the field being edited");
+    // A press that drags along the text, released over the field.
+    h.drag_at(p);
+    h.run_steps(1);
+    let q = p + egui::vec2(20.0, 0.0);
+    h.hover_at(q);
+    h.run_steps(1);
+    release(&mut h, q);
+    assert!(log(&h).ends_with("|a Mouse Down|a Mouse Up|a Mouse Down|a Mouse Up"), "{}", log(&h));
+    assert_eq!(h.state().views[0].forms.focus.as_ref().map(|f| f.name.as_str()), Some("a"), "still being edited");
+}
+
 /// A field's mouse and focus actions (ISO 32000-2 Table 197) run as the pointer and the focus
 /// move, in the order another viewer runs them on a synthetic form: hovering runs Mouse Enter and
 /// Exit; a click runs Mouse Down, then what the field left commits and its Blur, then Focus, then
