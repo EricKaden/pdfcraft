@@ -607,6 +607,39 @@ pub fn rerender(doc: &mut Document, tpl: &Template) -> Result<Report, XfaError> 
             Some(r) => doc.set(r, Object::Dict(acro)),
             None => doc.update_dict(root, |c| c.set(b"AcroForm".to_vec(), Object::Dict(acro)))?,
         }
+        // A generated field edited in this overlay is freed with its appearance and widget kids,
+        // so a replaced password widget's value or masked appearance cannot stay in the overlay.
+        // Signature fields, and the fields that name them by their SOM path, stay: the new
+        // layout's signature field took their value and appearance.
+        let free_ap = |doc: &mut Document, d: &Dict| {
+            if let Some(ap) = d.get(b"AP").map(|a| doc.resolve(a)).and_then(|a| a.as_dict().cloned())
+                && let Some(n) = ap.get(b"N").and_then(Object::as_ref)
+                && doc.is_edited(n.num)
+            {
+                doc.free(n);
+            }
+        };
+        let signature = |d: &Dict| d.name(b"FT") == Some(b"Sig".as_slice()) || d.contains(crate::pdf::NODE_KEY);
+        for r in generated {
+            let Some(d) = doc.get(r).as_dict().cloned().filter(|d| !signature(d)) else { continue };
+            free_ap(doc, &d);
+            if let Some(kids) = d.get(b"Kids").map(|k| doc.resolve(k)).and_then(|k| k.as_array().cloned()) {
+                for k in kids.iter().filter_map(Object::as_ref) {
+                    if let Some(kd) = doc.get(k).as_dict().cloned() {
+                        if signature(&kd) {
+                            continue;
+                        }
+                        free_ap(doc, &kd);
+                    }
+                    if doc.is_edited(k.num) {
+                        doc.free(k);
+                    }
+                }
+            }
+            if doc.is_edited(r.num) {
+                doc.free(r);
+            }
+        }
     }
     let mut warnings = form.warnings;
     warnings.extend(written.warnings);
