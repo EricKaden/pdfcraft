@@ -461,6 +461,9 @@ impl PdfCraftApp {
     /// saved, printed or exported without it.
     pub(crate) fn commit_form_typing(&mut self) -> bool {
         let Some((i, id)) = self.active_ids() else { return true };
+        // A keystroke this frame hasn't run yet goes through the field's change scripts first,
+        // as it does before a queued edit is applied in the frame.
+        self.run_keystroke_scripts(i);
         if !self.apply_queued_edit(i) {
             return false;
         }
@@ -1739,6 +1742,30 @@ mod revert_draft_tests {
         assert!(app.process_pending_edits());
         let value = app.session.get(id).unwrap().form.iter().find(|f| f.name == "digits").map(|f| f.value.clone()).unwrap_or_default();
         assert_eq!(value, vec!["12".to_string()]);
+    }
+
+    /// Save, Print and the other commands that commit the form first run a keystroke still
+    /// pending, as the frame would: letters typed into a digits-only field are dropped, whether
+    /// its editor is still open or closed this frame.
+    #[test]
+    fn committing_the_form_runs_a_pending_keystrokes_change_scripts() {
+        for closed in [false, true] {
+            let mut app = PdfCraftApp::new();
+            app.open_bytes("keys.pdf", None, pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::keystroke_template())).unwrap();
+            let i = app.active.unwrap();
+            let id = app.views[i].id;
+            let mut draft = focus("a1b2");
+            draft.name = "digits".into();
+            draft.keystroke = Some(crate::forms_ui::keystroke_from("", "a1b2", Some((0, 0)), false));
+            app.views[i].forms.focus = Some(draft);
+            if closed {
+                let form = app.session.get(id).unwrap().form.clone();
+                crate::forms_ui::commit(&mut app.views[i], &form);
+            }
+            assert!(app.commit_form_typing());
+            let value = app.session.get(id).unwrap().form.iter().find(|f| f.name == "digits").map(|f| f.value.clone()).unwrap_or_default();
+            assert_eq!(value, vec!["12".to_string()], "editor closed this frame: {closed}");
+        }
     }
 
     fn app() -> PdfCraftApp {
