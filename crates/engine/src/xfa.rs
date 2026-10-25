@@ -917,8 +917,11 @@ pub(crate) fn on_changes(
                 _ => false,
             })
         });
-        // Each object's exit is noted only when one of its scripts ran: one the event's budget
-        // skipped, or one an error before it stopped, is still to run when it loses focus.
+        // Each object's exit is noted only when one of its scripts ran, whether it succeeded or
+        // failed: it has run for this focus loss, and a failed script keeps what it changed
+        // before its error, so running it again would repeat that and the error. One the event's
+        // budget skipped, or one never reached because an earlier script stopped the run, is
+        // still to run when it loses focus.
         for at in [button, Some(som.as_str())].into_iter().flatten().filter(|_| !keeps_focus) {
             let mut ran_exit = false;
             for ev in r.events_of(at, "exit") {

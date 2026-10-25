@@ -170,7 +170,7 @@ impl PdfCraftApp {
                     }
                     Edit::AddAnnotation(a) => {
                         // Select the new comment (appended last among the page's comments).
-                        let newest = info.annotations.iter().filter(|x| x.page == a.page && x.in_reply_to.is_none()).map(|x| x.index).max();
+                        let newest = info.annotations.iter().filter(|x| x.page == a.page && !x.is_reply()).map(|x| x.index).max();
                         view.comments.selected = newest.map(|n| (a.page, n));
                         view.comments.reveal = true;
                         // A new highlight opens its note for typing straight away, as in Acrobat,
@@ -465,9 +465,11 @@ impl PdfCraftApp {
 
     /// Make the active document say what its form shows (#166): apply an edit still queued on
     /// its tab, then commit the text in a field's open editor, which otherwise commits only on
-    /// Enter, Tab or clicking away (the editor closes, as clicking away would). Run before
-    /// anything reads the document: Save, Print, Export, Optimize, Sign, Extract, Split, Copy
-    /// pages and button scripts.
+    /// Enter, Tab or clicking away (the editor closes, as clicking away would), then run the
+    /// XFA enter and exit scripts of a focus move whose scripts haven't run yet (closing the
+    /// editor is one; so is a move made in the same frame), so the document has what they
+    /// change too. Run before anything reads the document: Save, Print, Export, Optimize, Sign,
+    /// Extract, Split, Copy pages and button scripts.
     ///
     /// Returns false when the field rejects the value (a validation script or format; the user
     /// is told why). The editor stays open with the text, and the caller must stop: nothing is
@@ -477,14 +479,21 @@ impl PdfCraftApp {
         if !self.apply_queued_edit(i) {
             return false;
         }
-        let Some(draft) = self.views.get(i).and_then(|v| v.forms.focus.clone()) else { return true };
+        let Some(draft) = self.views.get(i).and_then(|v| v.forms.focus.clone()) else {
+            self.run_focus_scripts(i);
+            return true;
+        };
         let Some(edit) = self.session.get(id).and_then(|d| crate::forms_ui::draft_edit(&draft, &d.form)) else {
-            return true; // nothing typed that the document doesn't already have
+            // Nothing typed that the document doesn't already have.
+            self.run_focus_scripts(i);
+            return true;
         };
         if let Some(view) = self.views.get_mut(i) {
             view.forms.focus = None;
         }
         if self.apply_edit(edit) {
+            // The editor closed: the field's exit runs now, unless its change just ran it.
+            self.run_focus_scripts(i);
             return true;
         }
         if let Some(view) = self.views.get_mut(i) {
@@ -521,24 +530,26 @@ impl PdfCraftApp {
             let before: Option<(String, Vec<String>)> = edited
                 .as_ref()
                 .and_then(|e| self.session.get(id)?.form.iter().find(|f| &f.name == e).map(|f| (crate::forms_ui::draft_text(f), f.value.clone())));
-            match self.session.field_focus_crossing(id, &name, widget, focus, crossing) {
-                Ok(changed) => {
-                    if changed
-                        && let Some(info) = self.session.get(id).map(|d| d.info.clone())
-                        && let Some(view) = self.views.get_mut(i)
-                    {
-                        view.document_changed(&info);
-                        if let Some(before) = &before
-                            && let Some(draft) = view.forms.focus.as_mut()
-                            && let Some(f) = self.session.get(id).and_then(|d| d.form.iter().find(|f| f.name == draft.name))
-                        {
-                            crate::forms_ui::refresh_draft(draft, (&before.0, &before.1), (crate::forms_ui::draft_text(f), &f.value));
-                        }
-                    }
-                    let out = self.session.take_js_output(id);
-                    self.handle_js(id, out);
+            // Each object's scripts are an edit of their own, so one that fails after another ran
+            // (the button's, after its group's) leaves what ran before it, and what it showed.
+            let generation = self.session.get(id).map(|d| d.edit_generation());
+            let ran = self.session.field_focus_crossing(id, &name, widget, focus, crossing);
+            if self.session.get(id).map(|d| d.edit_generation()) != generation
+                && let Some(info) = self.session.get(id).map(|d| d.info.clone())
+                && let Some(view) = self.views.get_mut(i)
+            {
+                view.document_changed(&info);
+                if let Some(before) = &before
+                    && let Some(draft) = view.forms.focus.as_mut()
+                    && let Some(f) = self.session.get(id).and_then(|d| d.form.iter().find(|f| f.name == draft.name))
+                {
+                    crate::forms_ui::refresh_draft(draft, (&before.0, &before.1), (crate::forms_ui::draft_text(f), &f.value));
                 }
-                Err(e) => self.notify_error(e),
+            }
+            let out = self.session.take_js_output(id);
+            self.handle_js(id, out);
+            if let Err(e) = ran {
+                self.notify_error(e);
             }
         }
     }
@@ -576,7 +587,7 @@ impl PdfCraftApp {
                 let newest = self
                     .session
                     .get(view.id)
-                    .and_then(|d| d.info.annotations.iter().filter(|a| a.page == page && a.in_reply_to.is_none()).map(|a| a.index).max());
+                    .and_then(|d| d.info.annotations.iter().filter(|a| a.page == page && !a.is_reply()).map(|a| a.index).max());
                 view.comments.selected = newest.map(|index| (page, index));
                 view.comments.reveal = true;
                 self.quick_tool = crate::QuickTool::Select;
@@ -939,6 +950,9 @@ impl PdfCraftApp {
                     // Revert discards this source's uncommitted typing as well as model edits.
                     // Otherwise a later Save could write a rejected draft back into the file.
                     view.forms.focus = None;
+                    // The focus goes with them, running no exit: a script changing the document
+                    // just reverted would only make it unsaved again.
+                    view.forms.focused = None;
                     view.forms.committed = None;
                     view.forms.unbaked.clear();
                     view.pending_edit = None;
@@ -1682,6 +1696,7 @@ mod revert_draft_tests {
             calendar: None,
             calendar_rect: None,
             calendar_text: None,
+            had_focus: false,
         }
     }
 
@@ -1843,6 +1858,49 @@ mod revert_draft_tests {
         }
     }
 
+    /// Revert drops the focus without running the exit of the field that had it: the document
+    /// is the saved one again, and nothing changes it after.
+    #[test]
+    fn revert_runs_no_exit_for_the_field_that_had_the_focus() {
+        let mut app = PdfCraftApp::new();
+        app.open_bytes("focus.pdf", None, pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::focus_template())).unwrap();
+        let id = app.views[0].id;
+        let count = |app: &PdfCraftApp, name: &str| {
+            app.session.get(id).unwrap().form.iter().find(|f| f.name == name).and_then(|f| f.value.first().cloned()).unwrap_or_default()
+        };
+        app.views[0].forms.focus = Some(Focus { name: "probe".into(), ..focus("") });
+        assert!(app.process_pending_edits());
+        assert_eq!(count(&app, "enters"), "1", "reaching probe ran its enter");
+        app.revert_active();
+        assert_eq!(count(&app, "enters"), "0");
+        assert!(app.process_pending_edits());
+        assert_eq!(count(&app, "exits"), "0", "no exit ran on the reverted document");
+        assert!(!app.session.get(id).unwrap().dirty);
+    }
+
+    /// A focus move whose scripts the frame hasn't run yet (Save pressed as the focus reaches a
+    /// field) runs them before anything reads the document: `hint`'s enter clears its "Type here".
+    #[test]
+    fn committing_the_form_runs_the_focus_scripts_of_a_move_not_yet_run() {
+        let mut app = PdfCraftApp::new();
+        app.open_bytes("focus.pdf", None, pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::focus_template())).unwrap();
+        let hint = |app: &PdfCraftApp| {
+            app.session
+                .get(app.views[0].id)
+                .unwrap()
+                .form
+                .iter()
+                .find(|f| f.name == "hint")
+                .and_then(|f| f.value.first().cloned())
+                .unwrap_or_default()
+        };
+        assert_eq!(hint(&app), "Type here");
+        // As the editor opens on it: its text and value.
+        app.views[0].forms.focus = Some(Focus { name: "hint".into(), text: "Type here".into(), picked: vec!["Type here".into()], ..focus("") });
+        assert!(app.commit_form_typing());
+        assert_eq!(hint(&app), "", "hint's enter ran before the document is read");
+        assert_eq!(app.views[0].forms.focus.as_ref().map(|f| f.text.as_str()), Some(""), "and its editor shows it");
+    }
     #[test]
     fn successful_revert_clears_focused_or_queued_drafts_only_on_its_document() {
         for queued in [false, true] {
