@@ -983,6 +983,9 @@ impl PdfCraftApp {
                     // Revert discards this source's uncommitted typing as well as model edits.
                     // Otherwise a later Save could write a rejected draft back into the file.
                     view.forms.focus = None;
+                    // The focus goes with them, running no exit: a script changing the document
+                    // just reverted would only make it unsaved again.
+                    view.forms.focused = None;
                     view.forms.committed = None;
                     view.forms.unbaked.clear();
                     view.pending_edit = None;
@@ -1907,6 +1910,26 @@ mod revert_draft_tests {
             assert!(doc.added().iter().any(|a| matches!(&a.content, AddedContent::Text(t) if t.text == "Typed")), "quit: {quit}");
             let _ = std::fs::remove_dir_all(&dir);
         }
+    }
+
+    /// Revert drops the focus without running the exit of the field that had it: the document
+    /// is the saved one again, and nothing changes it after.
+    #[test]
+    fn revert_runs_no_exit_for_the_field_that_had_the_focus() {
+        let mut app = PdfCraftApp::new();
+        app.open_bytes("focus.pdf", None, pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::focus_template())).unwrap();
+        let id = app.views[0].id;
+        let count = |app: &PdfCraftApp, name: &str| {
+            app.session.get(id).unwrap().form.iter().find(|f| f.name == name).and_then(|f| f.value.first().cloned()).unwrap_or_default()
+        };
+        app.views[0].forms.focus = Some(Focus { name: "probe".into(), ..focus("") });
+        assert!(app.process_pending_edits());
+        assert_eq!(count(&app, "enters"), "1", "reaching probe ran its enter");
+        app.revert_active();
+        assert_eq!(count(&app, "enters"), "0");
+        assert!(app.process_pending_edits());
+        assert_eq!(count(&app, "exits"), "0", "no exit ran on the reverted document");
+        assert!(!app.session.get(id).unwrap().dirty);
     }
 
     /// A focus move whose scripts the frame hasn't run yet (Save pressed as the focus reaches a
