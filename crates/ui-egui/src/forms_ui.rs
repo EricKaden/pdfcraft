@@ -9,11 +9,12 @@
 
 use std::collections::HashSet;
 
-use egui::{Color32, CornerRadius, Rect, Stroke, vec2};
+use egui::{Color32, CornerRadius, Pos2, Rect, Stroke, vec2};
 use pdfcraft_engine::{Edit, FieldValue, FormField, FormFieldKind, FormWidget, field_flags, form_appearance};
 use pdfcraft_render::DocInfo;
 
 use crate::canvas::{DocView, PageXform};
+use crate::page_pointer::PagePointer;
 
 const FOCUS_BLUE: Color32 = Color32::from_rgb(0x14, 0x73, 0xE6);
 /// Background of the in-place text field editor, the same in every theme.
@@ -43,6 +44,9 @@ pub struct Focus {
     pub calendar_text: Option<String>,
     /// Drop-downs: where the open list is scrolled to and which item is current.
     pub list: ChoiceList,
+    /// Whether the text box had the keyboard at the end of the editor's last frame
+    /// ([`crate::edit_text_ui::lost_focus_once`]).
+    pub(crate) had_focus: bool,
 }
 
 /// A drop-down's open list: the first item shown, the item the keys or the pointer are on, and
@@ -141,6 +145,7 @@ fn open_focus(f: &FormField, widget: usize) -> Focus {
         calendar_rect: None,
         calendar_text: None,
         list: ChoiceList::default(),
+        had_focus: false,
     }
 }
 
@@ -186,14 +191,14 @@ pub(crate) fn page_input(
     ui: &egui::Ui,
     resp: &egui::Response,
     xf: &PageXform,
+    ptr: &PagePointer,
     page: usize,
     info: &DocInfo,
     form: &[FormField],
     allowed: bool,
     view: &mut DocView,
 ) -> FieldPointer {
-    let pointer = ui.input(|i| i.pointer.hover_pos());
-    let Some(p) = pointer.filter(|p| xf.rect.contains(*p)) else { return FieldPointer::Away };
+    let Some(p) = ptr.within(xf.rect) else { return FieldPointer::Away };
     let hit = form.iter().find_map(|f| {
         f.widgets
             .iter()
@@ -223,7 +228,7 @@ pub(crate) fn page_input(
     }
     // A text field opens on the press rather than the click, so a drag that starts on it
     // selects its text (#2213).
-    let pressed = f.kind == FormFieldKind::Text && usable && resp.is_pointer_button_down_on() && ui.input(|i| i.pointer.primary_pressed());
+    let pressed = f.kind == FormFieldKind::Text && usable && resp.is_pointer_button_down_on() && ptr.pressed().is_some();
     if pressed && view.forms.focus.as_ref().is_none_or(|x| x.name != f.name || x.widget != wi) {
         commit(view, form);
         view.forms.focus = Some(Focus { press: Some(p), ..open_focus(f, wi) });
@@ -255,7 +260,7 @@ pub(crate) fn page_input(
         // The press already committed the previous field and opened this one (above), unless
         // press and release came in one frame. Committing again would re-run a validation that
         // refused the value on the press.
-        FormFieldKind::Text if !ui.input(|i| i.pointer.primary_pressed()) => {
+        FormFieldKind::Text if ptr.pressed().is_none() => {
             // An editor opened by the press cannot be hit until a frame has laid it out: the
             // release lands on the page and would take its focus away.
             if let Some(x) = view.forms.focus.as_mut().filter(|x| x.name == f.name && x.widget == wi) {
@@ -496,9 +501,16 @@ fn calendar(ctx: &egui::Context, view: &mut DocView, field: egui::Rect, fmt: &st
     picked
 }
 
-/// Paint focus and hover frames on a page.
-pub(crate) fn paint_page(ui: &egui::Ui, painter: &egui::Painter, xf: &PageXform, page: usize, info: &DocInfo, form: &[FormField], view: &DocView) {
-    let pointer = ui.input(|i| i.pointer.hover_pos());
+/// Paint focus and hover frames on a page, the pages' `pointer` over it.
+pub(crate) fn paint_page(
+    painter: &egui::Painter,
+    xf: &PageXform,
+    page: usize,
+    info: &DocInfo,
+    form: &[FormField],
+    view: &DocView,
+    pointer: Option<Pos2>,
+) {
     for f in form {
         for (wi, w) in f.widgets.iter().enumerate().filter(|(_, w)| w.page == Some(page) && !w.hidden) {
             let r = widget_rect(xf, info, page, w.rect);
@@ -682,6 +694,10 @@ pub(crate) fn overlay(
         return None;
     };
     let rect = widget_rect(&xf, info, page, w.rect);
+    // Whether a click this frame landed outside the field. Where it landed is `interact_pos`: a
+    // tap's release comes with `PointerGone` (egui-winit sends one with every touch release, and
+    // winit reports Windows pen input as touch), which clears `hover_pos`.
+    let clicked_outside = || ctx.input(|i| i.pointer.any_click() && !i.pointer.interact_pos().is_some_and(|p| rect.contains(p)));
     let zoom = xf.zoom();
     let mut edit = None;
     let mut close = false;
@@ -767,6 +783,7 @@ pub(crate) fn overlay(
                             st.store(ui.ctx(), r.id);
                         }
                     }
+                    let lost = crate::edit_text_ui::lost_focus_once(&r, &mut fx.had_focus);
                     let (enter, esc, tab, shift) = ui.input(|i| {
                         (i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape), i.key_pressed(egui::Key::Tab), i.modifiers.shift)
                     });
@@ -774,7 +791,7 @@ pub(crate) fn overlay(
                         close = true;
                     } else if tab {
                         next = Some(!shift);
-                    } else if r.lost_focus()
+                    } else if lost
                         && (!multiline || !enter)
                         && !fx.calendar_rect.is_some_and(|c| ui.input(|i| i.pointer.interact_pos().is_some_and(|p| c.contains(p))))
                     {
@@ -814,9 +831,7 @@ pub(crate) fn overlay(
                 edit = Some(Edit::SetFieldValue { name: f.name.clone(), value: FieldValue::Choice(vec![export.clone()]) });
                 close = true;
             }
-            let clicked_away = ctx.input(|i| i.pointer.any_click())
-                && !resp.response.contains_pointer()
-                && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| rect.contains(p));
+            let clicked_away = !resp.response.contains_pointer() && clicked_outside();
             let (tab, shift) = ctx.input(|i| (i.key_pressed(egui::Key::Tab), i.modifiers.shift));
             if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
                 close = true;
@@ -850,8 +865,7 @@ pub(crate) fn overlay(
                     edit = Some(Edit::SetFieldValue { name: f.name.clone(), value: FieldValue::Choice(vec![export]) });
                 }
             }
-            let clicked_away = ctx.input(|i| i.pointer.any_click()) && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| rect.contains(p));
-            if clicked_away {
+            if clicked_outside() {
                 close = true;
             }
         }
@@ -888,8 +902,7 @@ pub(crate) fn overlay(
                     None
                 }
             });
-            let clicked_away = ctx.input(|i| i.pointer.any_click() && !i.pointer.hover_pos().is_some_and(|p| rect.contains(p)));
-            if esc || clicked_away {
+            if esc || clicked_outside() {
                 close = true;
             } else if tab {
                 next = Some(!shift);
