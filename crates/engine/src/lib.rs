@@ -4642,6 +4642,8 @@ impl Session {
         Self::sync_dirty(doc);
         // The changes whose exits ran are gone with the rest: skip no exit.
         doc.xfa_exited.clear();
+        // Nor is any field the focus was on still edited: no check box keeps its exit for later.
+        doc.xfa_focus = None;
         doc.generation += 1;
         Self::refresh(doc).inspect_err(|_| Self::show_released(doc))
     }

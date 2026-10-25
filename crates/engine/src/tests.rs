@@ -5345,6 +5345,18 @@ fn a_check_box_clicked_with_the_focus_runs_its_exit_once_as_the_focus_leaves() {
     assert!(log(&s).ends_with("|cb exit 0|cb change 1|cb click 1|cb exit 1"), "set without the focus: {}", log(&s));
 }
 
+/// Revert forgets where the focus was: a check box set after it, with nothing focused, runs its
+/// exit with the change.
+#[test]
+fn revert_forgets_which_check_box_had_the_focus() {
+    use crate::js::FieldFocus::Enter;
+    let (mut s, id, cb) = toggle_focus_form(pdfcraft_forms::FieldKind::CheckBox);
+    assert!(s.field_focus(id, &cb, 0, Enter).unwrap());
+    s.revert(id).unwrap();
+    s.apply(id, Edit::SetFieldValue { name: cb.clone(), value: FieldValue::Check(true) }).unwrap();
+    assert_eq!(field_text(&s, id, "log"), "cb change 1|cb click 1|cb exit 1");
+}
+
 /// A radio group keeps the focus as its buttons are clicked, in the order another viewer runs on
 /// a synthetic form: the group's change and click before the button's, the exits only as the
 /// focus moves to the other button (that button's alone) and out of the group (the button's,
