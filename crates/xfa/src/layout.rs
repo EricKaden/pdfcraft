@@ -1732,6 +1732,8 @@ impl Layouter<'_> {
         self.push_block(block)
     }
 
+    /// Draw a `draw` element (static text, an image, a line, a rectangle or an arc) in `rect`,
+    /// inside its border and margin.
     fn draw_draw(&mut self, d: &Draw, rect: Rect, ctx: &Ctx) -> Result<(), XfaError> {
         if let Some(b) = &d.common.border {
             self.draw_border(b, rect)?;

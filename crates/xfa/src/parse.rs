@@ -625,6 +625,8 @@ fn parse_page_set(n: XmlNode, warnings: &mut Vec<String>, depth: usize) -> PageS
     PageSet { areas }
 }
 
+/// A `subform` element: its own attributes, its page set if it has one, and the nodes it holds,
+/// `depth` levels down (for the nesting limit).
 fn parse_subform(n: XmlNode, warnings: &mut Vec<String>, depth: usize) -> Subform {
     let common = parse_common(n);
     let mut children_out = Vec::new();
