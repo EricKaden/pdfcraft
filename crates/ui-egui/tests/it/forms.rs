@@ -1609,6 +1609,72 @@ fn attached_files_of_one_name_open_in_tabs_of_their_own() {
     assert_eq!((pages(&h).len(), h.state().active), (3, Some(1)), "the first a.pdf's own tab");
 }
 
+/// A page with one attached file, `Locked.pdf`: the `GUIDE_INNER` page behind the open
+/// password `pw`.
+fn locked_attachment() -> Vec<u8> {
+    use pdfcraft_engine::{Edit, Protection, Session};
+    let mut session = Session::new();
+    let id = session.open("inner.pdf", None, std::sync::Arc::new(GUIDE_INNER.as_bytes().to_vec()), None).unwrap();
+    session.apply(id, Edit::Protect(Protection { open_password: Some("pw".into()), ..Default::default() })).unwrap();
+    let inner = session.save_bytes(id).unwrap().as_ref().clone();
+    let mut stream = format!("<< /Type /EmbeddedFile /Length {} >>\nstream\n", inner.len()).into_bytes();
+    stream.extend_from_slice(&inner);
+    stream.extend_from_slice(b"\nendstream");
+    let objs: Vec<Vec<u8>> = vec![
+        b"<< /Type /Catalog /Pages 2 0 R /Names << /EmbeddedFiles << /Names [(Locked.pdf) 4 0 R] >> >> >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] >>".to_vec(),
+        b"<< /Type /Filespec /F (Locked.pdf) /UF (Locked.pdf) /EF << /F 5 0 R >> >>".to_vec(),
+        stream,
+    ];
+    let mut out = b"%PDF-1.7\n".to_vec();
+    let mut offs = Vec::new();
+    for (i, o) in objs.iter().enumerate() {
+        offs.push(out.len());
+        out.extend_from_slice(format!("{} 0 obj\n", i + 1).as_bytes());
+        out.extend_from_slice(o);
+        out.extend_from_slice(b"\nendobj\n");
+    }
+    let x = out.len();
+    out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+    for o in offs {
+        out.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    out.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{x}\n%%EOF\n", objs.len() + 1).as_bytes());
+    out
+}
+
+/// An attached PDF behind a password opens in a tab of its own once unlocked, after a wrong
+/// try too, and that tab is still the attachment's: asking for it again goes back to it rather
+/// than asking for the password again. Both ways a password is taken: on the open worker, and
+/// inline (as on the web).
+#[test]
+fn an_attachment_opened_after_its_password_returns_to_its_tab() {
+    let _gpu = crate::gpu();
+    for inline in [false, true] {
+        let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(|_cc| {
+            let mut app = PdfCraftApp::new();
+            app.set_option("language", "en").unwrap();
+            app.open_bytes("outer.pdf", None, locked_attachment()).unwrap();
+            app
+        });
+        h.run_steps(4);
+        h.state_mut().run_inline = inline;
+        let id = h.state().views[0].id;
+        h.state_mut().attachment_action(id, 0, true);
+        crate::support::wait_until(&mut h, "the password prompt", |app| app.password_prompt.is_some());
+        h.state_mut().submit_password(Some("wrong".into()));
+        crate::support::wait_until(&mut h, "the retry", |app| app.password_prompt.as_ref().is_some_and(|p| p.error.is_some()));
+        h.state_mut().submit_password(Some("pw".into()));
+        crate::support::wait_until(&mut h, "the unlocked tab", |app| app.views.len() == 2 && app.password_prompt.is_none());
+        h.state_mut().active = Some(0);
+        h.state_mut().attachment_action(id, 0, true);
+        h.run_steps(2);
+        assert!(h.state().password_prompt.is_none(), "inline {inline}: no second prompt");
+        assert_eq!((h.state().views.len(), h.state().active), (2, Some(1)), "inline {inline}: back to its tab");
+    }
+}
+
 /// Two combo boxes of Apple and Banana: `fruit` editable (Combo and Edit, ISO 32000-2 Table 233),
 /// `veg` a drop-down list only.
 fn combo_form() -> Vec<u8> {

@@ -569,6 +569,9 @@ pub struct PasswordPrompt {
     then: Option<&'static str>,
     /// A link destination to apply after the linked PDF is unlocked.
     after_open: Option<pdfcraft_render::RemoteDestination>,
+    /// The document and attached file this one was opened from: its tab keeps that origin once
+    /// it opens, after the password ([`crate::canvas::DocView::from_attachment`]).
+    from_attachment: Option<(DocId, pdfcraft_render::AttachmentSource, String)>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -580,6 +583,9 @@ struct PendingOpen {
     stamp: Option<file_watch::Stamp>,
     activate: bool,
     after_open: Option<pdfcraft_render::RemoteDestination>,
+    /// The document and attached file this one was opened from: its tab keeps that origin once
+    /// it opens, after the password ([`crate::canvas::DocView::from_attachment`]).
+    from_attachment: Option<(DocId, pdfcraft_render::AttachmentSource, String)>,
     recovered: Option<RecoveryMeta>,
     then: Option<&'static str>,
 }
@@ -593,6 +599,9 @@ struct OpenRequest {
     password: Option<String>,
     activate: bool,
     after_open: Option<pdfcraft_render::RemoteDestination>,
+    /// The document and attached file this one was opened from: its tab keeps that origin once
+    /// it opens, after the password ([`crate::canvas::DocView::from_attachment`]).
+    from_attachment: Option<(DocId, pdfcraft_render::AttachmentSource, String)>,
     recovered: Option<RecoveryMeta>,
     then: Option<&'static str>,
 }
@@ -1422,6 +1431,7 @@ impl PdfCraftApp {
             stamp: request.stamp,
             activate: request.activate,
             after_open: request.after_open,
+            from_attachment: request.from_attachment,
             recovered: request.recovered,
             then: request.then,
         });
@@ -1486,6 +1496,11 @@ impl PdfCraftApp {
                         if pending.path.is_some() {
                             self.watch.known_as(id, pending.stamp);
                         }
+                        if let Some(origin) = pending.from_attachment
+                            && let Some(view) = self.views.iter_mut().find(|v| v.id == id)
+                        {
+                            view.from_attachment = Some(origin);
+                        }
                         if let Some(destination) = pending.after_open {
                             self.apply_remote_destination(destination);
                         }
@@ -1512,6 +1527,7 @@ impl PdfCraftApp {
                         recovered: pending.recovered,
                         then: pending.then,
                         after_open: pending.after_open,
+                        from_attachment: pending.from_attachment,
                     });
                 }
                 Err(error) => self.notify_fmt("Couldn't open {name}: {e}", &[("name", &pending.name), ("e", &error.to_string())]),
@@ -1546,6 +1562,7 @@ impl PdfCraftApp {
                     recovered: None,
                     then: None,
                     after_open: None,
+                    from_attachment: None,
                 });
                 return Ok(());
             }
@@ -1662,6 +1679,7 @@ impl PdfCraftApp {
                         password: None,
                         activate: true,
                         after_open: None,
+                        from_attachment: None,
                         recovered: None,
                         then: None,
                     });
@@ -1838,13 +1856,18 @@ impl PdfCraftApp {
                 }
                 let before = self.views.len();
                 match self.open_bytes(&name, None, bytes) {
-                    // Opening bytes adds their tab at once (unless a password is asked for first).
+                    // Opening bytes adds their tab at once, unless a password is asked for first.
                     Ok(()) if self.views.len() > before => {
                         if let Some(v) = self.views.last_mut() {
                             v.from_attachment = Some(origin);
                         }
                     }
-                    Ok(()) => {}
+                    // A password is asked for first: the tab takes its origin once it opens.
+                    Ok(()) => {
+                        if let Some(prompt) = self.password_prompt.as_mut() {
+                            prompt.from_attachment = Some(origin);
+                        }
+                    }
                     Err(e) => self.notify_fmt("Couldn't open {name}: {e}", &[("name", &att.name), ("e", &e.to_string())]),
                 }
             }
@@ -1953,6 +1976,7 @@ impl PdfCraftApp {
                 password: Some(pw),
                 activate: p.activate,
                 after_open: p.after_open.clone(),
+                from_attachment: p.from_attachment.clone(),
                 recovered: p.recovered.clone(),
                 then: p.then,
             });
@@ -1966,6 +1990,8 @@ impl PdfCraftApp {
         #[cfg(not(target_arch = "wasm32"))]
         let (path_for_watch, stamp_for_watch) = (p.path.clone(), p.stamp);
         let after_open = p.after_open.clone();
+        let from_attachment = p.from_attachment.clone();
+        let before = self.views.len();
         match self.try_open(&p.name, p.path, p.bytes, Some(&pw), p.activate) {
             Err(e) => self.notify_fmt("Couldn't open {name}: {e}", &[("name", &p.name), ("e", &e.to_string())]),
             // A recovered encrypted document is open once its prompt is gone.
@@ -1979,6 +2005,11 @@ impl PdfCraftApp {
                         .find_map(|view| self.session.get(view.id).and_then(|doc| (doc.path.as_deref() == Some(path)).then_some(view.id)))
                 {
                     self.watch.known_as(id, stamp_for_watch);
+                }
+                if self.views.len() > before
+                    && let Some(view) = self.views.last_mut()
+                {
+                    view.from_attachment = from_attachment;
                 }
                 if let Some(destination) = after_open {
                     self.apply_remote_destination(destination);
@@ -1997,6 +2028,7 @@ impl PdfCraftApp {
                     prompt.recovered = p.recovered;
                     prompt.then = p.then;
                     prompt.after_open = after_open;
+                    prompt.from_attachment = from_attachment;
                 }
             }
         }
@@ -2094,6 +2126,7 @@ impl PdfCraftApp {
             password: None,
             activate: true,
             after_open: Some(destination),
+            from_attachment: None,
             recovered: None,
             then: None,
         });
@@ -2198,6 +2231,7 @@ impl PdfCraftApp {
                 password: None,
                 activate: true,
                 after_open: None,
+                from_attachment: None,
                 recovered: None,
                 then,
             }) {
