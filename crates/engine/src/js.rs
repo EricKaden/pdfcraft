@@ -302,6 +302,15 @@ impl Session {
         // Where the focus is now: a check box or radio group set while it has the focus runs its
         // exit scripts when it loses it, not with the change.
         doc.xfa_focus = (focus == FieldFocus::Enter).then(|| som.clone());
+        // A list box picked in while it had the focus validates as it loses it, before its exit;
+        // gaining focus starts afresh.
+        let validate = match focus {
+            FieldFocus::Enter => {
+                doc.xfa_unvalidated.clear();
+                false
+            }
+            FieldFocus::Exit => doc.xfa_unvalidated.remove(&som),
+        };
         // Which of them run, decided before any does: each edit forgets the exits a value's
         // change ran. Gaining focus starts afresh; losing it runs an exit unless the change just did.
         let mut run = Vec::new();
@@ -312,6 +321,9 @@ impl Session {
             }
         }
         let before = doc.generation;
+        if validate {
+            self.apply(id, Edit::XfaEvent { som: som.clone(), activity: "validate".into() })?;
+        }
         for som in run {
             // A script that ran away turned the form's scripts off (the group's, say): the rest
             // don't run, and the notice that says so is in the output.

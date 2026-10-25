@@ -5425,6 +5425,108 @@ fn a_check_box_clicked_with_the_focus_runs_its_exit_once_as_the_focus_leaves() {
     assert!(log(&s).ends_with("|cb exit 0|cb change 1|cb click 1|cb exit 1"), "set without the focus: {}", log(&s));
 }
 
+/// Validate comes before exit, and each kind of field validates when another viewer does, on
+/// synthetic forms: a text field as its value is committed (as it loses the focus), a check box
+/// as it is clicked (before its change scripts; its exit waits for the focus to leave), a
+/// drop-down as an item is picked (it gives up the focus, so it exits too), and a list box only
+/// as the focus leaves it, after items were picked in it. A list box entered and left without a
+/// pick doesn't validate, and one whose value fails says so as the focus leaves it.
+#[test]
+fn validate_runs_before_exit_and_a_list_box_validates_as_the_focus_leaves() {
+    use crate::js::FieldFocus::{Enter, Exit};
+    let log = |what: &str| {
+        format!(
+            r#"<script contentType="application/x-javascript">var l = xfa.form.form.log; l.rawValue = (l.rawValue == null || l.rawValue == "" ? "" : l.rawValue + "|") + "{what}";</script>"#
+        )
+    };
+    let events = |n: &str| {
+        ["enter", "change", "exit"].iter().map(|a| format!(r#"<event activity="{a}">{}</event>"#, log(&format!("{n} {a}")))).collect::<String>()
+    };
+    let validate = |n: &str, ok: &str| {
+        format!(
+            r#"<validate scriptTest="error"><message><text name="scriptTest">{n}: its own message</text></message><script contentType="application/x-javascript">var l = xfa.form.form.log; l.rawValue = l.rawValue + "|{n} validate"; {ok};</script></validate>"#
+        )
+    };
+    let items = "<items><text>Apple</text><text>Banana</text></items>";
+    let field = |n: &str, ui: &str, extra: &str, ok: &str| {
+        format!(r#"<field name="{n}" w="2in" h="0.3in"><ui>{ui}</ui>{extra}{}{}</field>"#, events(n), validate(n, ok))
+    };
+    let body = [
+        field("typed", "<textEdit/>", "", "true"),
+        field("cb", "<checkButton/>", "<items><integer>1</integer><integer>0</integer></items><value><integer>0</integer></value>", "true"),
+        field("drop", "<choiceList/>", items, "true"),
+        field("list", r#"<choiceList open="always"/>"#, items, "true"),
+        field("listFails", r#"<choiceList open="always"/>"#, items, "false"),
+    ]
+    .concat();
+    let xdp = format!(
+        r##"<?xml version="1.0" encoding="UTF-8"?>
+<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/">
+<template xmlns="http://www.xfa.org/schema/xfa-template/3.3/">
+<subform name="form" layout="tb">
+ <pageSet><pageArea name="front"><contentArea x="0.5in" y="0.5in" w="7.5in" h="10in"/><medium short="8.5in" long="11in"/></pageArea></pageSet>
+ {body}
+ <field name="log" w="7in" h="0.3in"><ui><textEdit/></ui></field>
+</subform>
+</template>
+</xdp:xdp>
+"##
+    );
+    let mut s = Session::new();
+    let id = s.open("order.pdf", None, Arc::new(pdfcraft_xfa::fixtures::shell(&xdp)), None).expect("opens");
+    // The open-time validations (on this branch's base they log nothing it checks): start afresh.
+    s.apply(id, Edit::SetFieldValue { name: "log".into(), value: FieldValue::Text("start".into()) }).unwrap();
+    let _ = s.take_js_output(id);
+    let set = |s: &mut Session, n: &str, value: Option<FieldValue>| {
+        assert!(s.field_focus(id, n, 0, Enter).is_ok());
+        if let Some(v) = value {
+            s.apply(id, Edit::SetFieldValue { name: n.into(), value: v }).unwrap();
+        }
+        assert!(s.field_focus(id, n, 0, Exit).is_ok());
+    };
+    set(&mut s, "typed", Some(FieldValue::Text("ab".into())));
+    set(&mut s, "cb", Some(FieldValue::Check(true)));
+    set(&mut s, "drop", Some(FieldValue::Choice(vec!["Banana".into()])));
+    set(&mut s, "list", Some(FieldValue::Choice(vec!["Banana".into()])));
+    set(&mut s, "list", None);
+    assert_eq!(
+        field_text(&s, id, "log"),
+        "start|typed enter|typed change|typed validate|typed exit|cb enter|cb validate|cb change|cb exit|drop enter|drop change|drop validate|drop exit|list enter|list change|list validate|list exit|list enter|list exit"
+    );
+    assert!(s.take_js_output(id).alerts.is_empty());
+    // A list box whose value fails: the message as the focus leaves, not as the item is picked.
+    assert!(s.field_focus(id, "listFails", 0, Enter).is_ok());
+    s.apply(id, Edit::SetFieldValue { name: "listFails".into(), value: FieldValue::Choice(vec!["Apple".into()]) }).unwrap();
+    assert!(s.take_js_output(id).alerts.is_empty(), "not yet");
+    assert!(s.field_focus(id, "listFails", 0, Exit).is_ok());
+    assert_eq!(s.take_js_output(id).alerts, ["listFails: its own message"]);
+}
+
+/// A form whose only focus-driven script is a list box's validation still waits for the focus
+/// to leave the list box to run it.
+#[test]
+fn a_list_box_with_only_a_validate_script_validates_as_the_focus_leaves() {
+    use crate::js::FieldFocus::{Enter, Exit};
+    let xdp = r##"<?xml version="1.0" encoding="UTF-8"?>
+<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/">
+<template xmlns="http://www.xfa.org/schema/xfa-template/3.3/">
+<subform name="form" layout="tb">
+ <pageSet><pageArea name="front"><contentArea x="0.5in" y="0.5in" w="7.5in" h="10in"/><medium short="8.5in" long="11in"/></pageArea></pageSet>
+ <field name="list" w="2in" h="0.9in"><ui><choiceList open="always"/></ui><items><text>Apple</text><text>Banana</text></items><validate scriptTest="error"><message><text name="scriptTest">list: its own message</text></message><script contentType="application/x-javascript">this.rawValue != "Apple";</script></validate></field>
+</subform>
+</template>
+</xdp:xdp>
+"##;
+    let mut s = Session::new();
+    let id = s.open("list.pdf", None, Arc::new(pdfcraft_xfa::fixtures::shell(xdp)), None).expect("opens");
+    let _ = s.take_js_output(id);
+    assert!(s.field_focus(id, "list", 0, Enter).is_ok());
+    s.apply(id, Edit::SetFieldValue { name: "list".into(), value: FieldValue::Choice(vec!["Apple".into()]) }).unwrap();
+    assert!(s.take_js_output(id).alerts.is_empty(), "not as the item is picked");
+    assert!(s.field_focus(id, "list", 0, Exit).is_ok());
+    assert_eq!(s.take_js_output(id).alerts, ["list: its own message"], "as the focus leaves");
+}
+
 /// Revert forgets where the focus was: a check box set after it, with nothing focused, runs its
 /// exit with the change.
 #[test]
@@ -5575,15 +5677,15 @@ fn on_changes_notes_only_the_exits_that_ran() {
     let tpl = doc.xfa_template.clone().unwrap();
     let names = vec!["probe".to_string()];
     let before = std::collections::HashMap::new();
-    let mut exited = Vec::new();
+    let mut left = crate::xfa::FocusLeft::default();
     let mut out = crate::js::JsOutput::default();
     let mut stopped = crate::xfa::XfaRun { page_count: 1, out: &mut out, datasets: None, ran_away: true, time_scale: 1 };
-    crate::xfa::on_changes(&mut cos, &tpl, &names, &before, None, &mut stopped, &mut exited).unwrap();
-    assert!(exited.is_empty(), "no exit ran: {exited:?}");
+    crate::xfa::on_changes(&mut cos, &tpl, &names, &before, None, &mut stopped, &mut left).unwrap();
+    assert!(left.exited.is_empty(), "no exit ran: {left:?}");
     let mut out = crate::js::JsOutput::default();
     let mut running = crate::xfa::XfaRun { page_count: 1, out: &mut out, datasets: None, ran_away: false, time_scale: 1 };
-    crate::xfa::on_changes(&mut cos, &tpl, &names, &before, None, &mut running, &mut exited).unwrap();
-    assert_eq!(exited.len(), 1, "the exit ran: {exited:?}");
+    crate::xfa::on_changes(&mut cos, &tpl, &names, &before, None, &mut running, &mut left).unwrap();
+    assert_eq!(left.exited.len(), 1, "the exit ran: {left:?}");
 }
 
 /// Scripts that change nothing leave no edit: the document stays saved, with nothing to undo,

@@ -439,6 +439,9 @@ pub struct Document {
     /// since they last gained focus: their exit on losing focus has run already
     /// ([`Session::field_focus`]).
     xfa_exited: std::collections::HashSet<String>,
+    /// SOM paths of the XFA list boxes picked in while they had the focus: they validate when they
+    /// lose it, before their exit ([`Session::field_focus`]).
+    xfa_unvalidated: std::collections::HashSet<String>,
     /// SOM path of the XFA object that has the focus (a field's widget, a radio button), as
     /// [`Session::field_focus`] last heard: a check box or radio group set while it has the focus
     /// runs its exit scripts only when it loses it ([`xfa::on_changes`]).
@@ -2695,7 +2698,7 @@ fn run_edit(doc: &mut pdfcraft_cos::Document, edit: &Edit, cx: &mut EditCtx) -> 
             let tpl = cx.xfa.clone().ok_or_else(|| EditError::Invalid("this is not a laid-out XFA form, or JavaScript is off".into()))?;
             let mut run =
                 xfa::XfaRun { page_count: cx.pages, out: &mut cx.xfa_out, datasets: cx.xfa_datasets, ran_away: false, time_scale: cx.xfa_time_scale };
-            let ran = if matches!(activity.as_str(), "enter" | "exit") {
+            let ran = if matches!(activity.as_str(), "enter" | "exit" | "validate") {
                 xfa::on_focus(doc, &tpl, som, activity, &mut run).map(|changes| changes.is_empty())
             } else {
                 xfa::on_event(doc, &tpl, som, activity, &mut run).map(|()| false)
@@ -3994,6 +3997,7 @@ impl Session {
             xfa_template: None,
             xfa_scripts_off: false,
             xfa_exited: Default::default(),
+            xfa_unvalidated: Default::default(),
             xfa_focus: None,
             fonts_stale: false,
             xfa_warnings: Vec::new(),
@@ -4110,7 +4114,7 @@ impl Session {
         // An XFA form's scripts answer the change: exit and validate scripts of the field, then
         // every calculation (and a reset recalculates). They read the data, so it is brought up
         // to date first. The fields whose exit scripts ran are noted once the edit is kept.
-        let mut exited: Vec<String> = Vec::new();
+        let mut left = xfa::FocusLeft::default();
         if let Some(tpl) = cx.xfa.clone() {
             if is_xfa && matches!(scope_of(&edit), Scope::Form | Scope::Full | Scope::Content) {
                 let datasets = &mut cx.xfa_datasets;
@@ -4145,7 +4149,7 @@ impl Session {
                 let before: std::collections::HashMap<String, Vec<String>> =
                     doc.form.iter().filter(|f| changed.contains(&f.name)).map(|f| (f.name.clone(), f.value.clone())).collect();
                 let focus = doc.xfa_focus.clone();
-                let ran = guard(|| xfa::on_changes(&mut next, &tpl, &changed, &before, focus.as_deref(), &mut run, &mut exited))
+                let ran = guard(|| xfa::on_changes(&mut next, &tpl, &changed, &before, focus.as_deref(), &mut run, &mut left))
                     .unwrap_or_else(|m| Err(format!("the form's scripts failed unexpectedly ({m})")));
                 cx.xfa_datasets = run.datasets;
                 cx.xfa_ran_away |= run.ran_away;
@@ -4219,7 +4223,8 @@ impl Session {
         // Only this edit's exits are skipped on the next focus loss: one an earlier change ran is
         // no reason to skip a later one.
         doc.xfa_exited.clear();
-        doc.xfa_exited.extend(exited);
+        doc.xfa_exited.extend(left.exited);
+        doc.xfa_unvalidated.extend(left.unvalidated);
         if !cx.xfa_removed.is_empty() {
             let removed: Vec<String> = cx.xfa_removed.iter().map(|n| format!("{XFA_REMOVED_PREFIX}{n}")).collect();
             doc.xfa_warnings.retain(|w| w.starts_with(XFA_REMOVED_PREFIX));
@@ -4269,6 +4274,7 @@ impl Session {
         Self::sync_dirty(doc);
         // The change whose exit ran is undone (or redone without its scripts): skip no exit.
         doc.xfa_exited.clear();
+        doc.xfa_unvalidated.clear();
         doc.generation += 1;
         Ok(label)
     }
@@ -4301,6 +4307,7 @@ impl Session {
         Self::sync_dirty(doc);
         // The change whose exit ran is undone (or redone without its scripts): skip no exit.
         doc.xfa_exited.clear();
+        doc.xfa_unvalidated.clear();
         doc.generation += 1;
         Ok(label)
     }
@@ -4694,6 +4701,7 @@ impl Session {
         Self::sync_dirty(doc);
         // The changes whose exits ran are gone with the rest: skip no exit.
         doc.xfa_exited.clear();
+        doc.xfa_unvalidated.clear();
         // Nor is any field the focus was on still edited: no check box keeps its exit for later.
         doc.xfa_focus = None;
         doc.generation += 1;

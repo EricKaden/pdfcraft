@@ -412,6 +412,17 @@ impl<'a, 'b> Runner<'a, 'b> {
         }
     }
 
+    /// Run validate script `ev` on `value`: one that answers false, or fails, shows its message
+    /// (else one naming field `name`) unless the value is empty; the value stays, as another
+    /// viewer marks the field invalid rather than reverting it.
+    fn validate(&mut self, ev: &ScriptEvent, name: &str, value: &str) -> Result<(), String> {
+        let Some(o) = self.run(ev, value)? else { return Ok(()) };
+        if (o.result_bool == Some(false) || o.error.is_some()) && !value.trim().is_empty() {
+            self.alert(ev.message.clone().unwrap_or_else(|| format!("{name}: the value is not valid")));
+        }
+        Ok(())
+    }
+
     fn alert(&mut self, m: String) {
         if self.run.out.alerts.len() < MAX_ALERTS_PER_EVENT {
             self.run.out.alerts.push(m);
@@ -866,15 +877,26 @@ pub(crate) fn on_open(doc: &mut pdfcraft_cos::Document, tpl: &Template, run: &mu
     r.finish()
 }
 
+/// What [`on_changes`] leaves to the focus: the SOM paths whose exit scripts ran with the change
+/// (they don't run again as the focus leaves), and the list boxes picked in while they kept the
+/// focus (they validate as it leaves).
+#[derive(Debug, Default)]
+pub(crate) struct FocusLeft {
+    pub exited: Vec<String>,
+    pub unvalidated: Vec<String>,
+}
+
 /// What a click on a check box or radio button runs once it has set the value, in order: the
 /// change scripts, then the click scripts, each reading the new value. A radio group runs each
 /// activity's scripts, then the radio button now on runs its own; the button it turned off runs
-/// none. Exit scripts follow, as after any change: the button's, then the group's. This is the
-/// order another viewer showed on a synthetic form.
+/// none. Its validate scripts come first, before the change scripts, and its exit scripts
+/// follow, as after any change: the button's, then the group's. This is the order another viewer
+/// showed on synthetic forms.
 const TOGGLE_ORDER: [&str; 2] = ["change", "click"];
 
-/// After fields `names` took new values: each one's change, exit and validate scripts, then
-/// the calculations once (or only those, after a reset). A check box or radio button runs its
+/// After fields `names` took new values: each one's change, validate and exit scripts, then
+/// the calculations once (or only those, after a reset), validate before exit as another viewer
+/// runs them. A check box or radio button runs its
 /// click scripts too ([`TOGGLE_ORDER`]): it changes only when it is clicked, and a click script
 /// reads the new value. A validate script that answers false, or fails, shows its message; the
 /// value stays, as Acrobat marks the field invalid rather than reverting it. `before` holds each
@@ -883,8 +905,10 @@ const TOGGLE_ORDER: [&str; 2] = ["change", "click"];
 /// is compared the second time with what the first left, so it is clicked once at most. A check
 /// box or radio group that has the focus (`focus`, the SOM path of its widget or of one of the
 /// group's buttons) runs no exit scripts here: it keeps the focus as it changes, and runs them
-/// once, when it loses it ([`crate::Session::field_focus`]), as another viewer does. The SOM
-/// paths whose exit scripts ran go into `exited`.
+/// once, when it loses it ([`crate::Session::field_focus`]), as another viewer does. A list box
+/// picked in while it has the focus keeps it too, and waits for it to leave to validate as well
+/// as to exit: its SOM path goes into `unvalidated`. A drop-down gives up the focus as an item
+/// is picked, so it validates and exits then. What is left for the focus goes into `left`.
 pub(crate) fn on_changes(
     doc: &mut pdfcraft_cos::Document,
     tpl: &Template,
@@ -892,7 +916,7 @@ pub(crate) fn on_changes(
     before: &HashMap<String, Vec<String>>,
     focus: Option<&str>,
     run: &mut XfaRun,
-    exited: &mut Vec<String>,
+    left: &mut FocusLeft,
 ) -> Result<(), String> {
     let mut r = Runner::new(doc, tpl, run, OPEN_BUDGET_MS);
     // Each field's value once its scripts have run, for a later mention of the same field.
@@ -906,6 +930,12 @@ pub(crate) fn on_changes(
         // A radio group's button now on runs each activity's scripts after the group's, and
         // its exit scripts before the group's, as when leaving it.
         let button = clicked.as_deref().filter(|b| *b != som);
+        // A check box or radio button validates as it is clicked, before its change scripts.
+        if clicked.is_some() {
+            for ev in r.events_of(&som, "validate") {
+                r.validate(&ev, name, &value)?;
+            }
+        }
         for activity in steps.iter().copied() {
             for at in [Some(som.as_str()), button].into_iter().flatten() {
                 for ev in r.events_of(at, activity) {
@@ -915,14 +945,26 @@ pub(crate) fn on_changes(
         }
         // A text field's value is committed as it loses the focus, and a value set without the
         // focus on the field (form_fill, a script) has no focus to lose: their exit follows.
+        use pdfcraft_forms::FieldKind as K;
+        let kind = r.fields().get(name).map(|f| f.kind);
         let keeps_focus = focus.is_some_and(|at| {
-            use pdfcraft_forms::FieldKind as K;
             r.fields().get(name).is_some_and(|f| match f.kind {
-                K::CheckBox => at == som,
+                K::CheckBox | K::List => at == som,
                 K::Radio => at == som || f.buttons.iter().any(|(_, b)| b == at),
                 _ => false,
             })
         });
+        // Any other field validates now, just before its exit; a list box that keeps the focus
+        // validates when it loses it.
+        let list_kept = keeps_focus && kind == Some(K::List);
+        if clicked.is_none() && !list_kept {
+            for ev in r.events_of(&som, "validate") {
+                r.validate(&ev, name, &value)?;
+            }
+        }
+        if list_kept {
+            left.unvalidated.push(som.clone());
+        }
         // Each object's exit is noted only when one of its scripts ran, whether it succeeded or
         // failed: it has run for this focus loss, and a failed script keeps what it changed
         // before its error, so running it again would repeat that and the error. One the event's
@@ -934,13 +976,7 @@ pub(crate) fn on_changes(
                 ran_exit |= r.run(&ev, &value)?.is_some();
             }
             if ran_exit {
-                exited.push(at.to_string());
-            }
-        }
-        for ev in r.events_of(&som, "validate") {
-            let Some(o) = r.run(&ev, &value)? else { continue };
-            if (o.result_bool == Some(false) || o.error.is_some()) && !value.trim().is_empty() {
-                r.alert(ev.message.clone().unwrap_or_else(|| format!("{name}: the value is not valid")));
+                left.exited.push(at.to_string());
             }
         }
         if let Some(f) = r.fields().get(name) {
@@ -1000,8 +1036,9 @@ pub(crate) fn on_event(doc: &mut pdfcraft_cos::Document, tpl: &Template, som: &s
     r.finish().map(|_| ())
 }
 
-/// A field gaining (`enter`) or losing (`exit`) focus: its scripts for that activity, then, when
-/// they changed something, the calculations. Returns what changed; nothing (and no error) when
+/// A field gaining (`enter`) or losing (`exit`) focus: its scripts for that activity (or, as a
+/// list box picked in loses it, its `validate` scripts first, which say when its value fails),
+/// then, when they changed something, the calculations. Returns what changed; nothing (and no error) when
 /// the field has no such script, so a focus change with nothing to run leaves the form alone.
 pub(crate) fn on_focus(doc: &mut pdfcraft_cos::Document, tpl: &Template, som: &str, activity: &str, run: &mut XfaRun) -> Result<Changes, String> {
     let mut r = Runner::new(doc, tpl, run, EVENT_BUDGET_MS);
@@ -1010,9 +1047,15 @@ pub(crate) fn on_focus(doc: &mut pdfcraft_cos::Document, tpl: &Template, som: &s
         return Ok(Changes::default());
     }
     // The field's value, as the script's event sees it (`xfa.event.prevText`, `newText`).
-    let value = r.by_som().get(som).cloned().and_then(|name| r.fields().get(&name).map(|f| f.value.join("\n"))).unwrap_or_default();
+    let name = r.by_som().get(som).cloned().unwrap_or_else(|| som.to_string());
+    let value = r.fields().get(&name).map(|f| f.value.join("\n")).unwrap_or_default();
     for ev in events {
-        r.run(&ev, &value)?;
+        // A list box's validation waits for the focus to leave it ([`on_changes`]).
+        if activity == "validate" {
+            r.validate(&ev, &name, &value)?;
+        } else {
+            r.run(&ev, &value)?;
+        }
     }
     if !r.changes.is_empty() {
         // The calculations that follow get a budget of their own.
