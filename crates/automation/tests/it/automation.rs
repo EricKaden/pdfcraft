@@ -7347,6 +7347,37 @@ fn xfa_check_box_and_radio_clicks_run_through_form_fill() {
     assert!(log(&mut a).ends_with("group click;no click;no exit;group exit;"), "{}", log(&mut a));
 }
 
+/// A check box filled while form_focus has put the focus on it keeps its exit for the focus
+/// loss: filled twice, it runs its exit once, on form_focus exit. Filled without the focus on
+/// it, its exit follows the change.
+#[test]
+fn a_check_box_filled_with_the_focus_runs_its_exit_on_form_focus_exit() {
+    let dir = workdir("xfa-toggle-focus");
+    std::fs::write(dir.join("toggle.pdf"), pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::toggle_focus_template())).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "toggle.pdf" }))["doc"].as_u64().unwrap();
+    let log = |a: &mut Automation| {
+        let f = ok(a, "form_fields", json!({ "doc": doc }));
+        f["fields"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|f| f["name"] == "log")
+            .map(|f| f["value"].as_str().unwrap_or_default().to_string())
+            .unwrap_or_default()
+    };
+    ok(&mut a, "form_focus", json!({ "doc": doc, "field": "cb", "event": "enter" }));
+    for on in [true, false] {
+        ok(&mut a, "form_fill", json!({ "doc": doc, "values": { "cb": on } }));
+    }
+    assert_eq!(log(&mut a), "cb enter 0|cb change 1|cb click 1|cb change 0|cb click 0", "no exit while it has the focus");
+    ok(&mut a, "form_focus", json!({ "doc": doc, "field": "cb", "event": "exit" }));
+    assert!(log(&mut a).ends_with("|cb click 0|cb exit 0"), "{}", log(&mut a));
+    ok(&mut a, "form_fill", json!({ "doc": doc, "values": { "cb": true } }));
+    assert!(log(&mut a).ends_with("|cb exit 0|cb change 1|cb click 1|cb exit 1"), "without the focus: {}", log(&mut a));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A form whose opening script runs away has its scripts turned off, and doc_info says so.
 #[test]
 fn active_xfa_skips_container_fallback_scripts_after_save_and_reopen() {

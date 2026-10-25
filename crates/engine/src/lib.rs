@@ -439,6 +439,10 @@ pub struct Document {
     /// since they last gained focus: their exit on losing focus has run already
     /// ([`Session::field_focus`]).
     xfa_exited: std::collections::HashSet<String>,
+    /// SOM path of the XFA object that has the focus (a field's widget, a radio button), as
+    /// [`Session::field_focus`] last heard: a check box or radio group set while it has the focus
+    /// runs its exit scripts only when it loses it ([`xfa::on_changes`]).
+    xfa_focus: Option<String>,
     /// A content-only refresh keeps `info` from before the edit; an edit may have added or
     /// embedded fonts, so the font list is read again on demand ([`Session::refresh_fonts`]).
     fonts_stale: bool,
@@ -3946,6 +3950,7 @@ impl Session {
             xfa_template: None,
             xfa_scripts_off: false,
             xfa_exited: Default::default(),
+            xfa_focus: None,
             fonts_stale: false,
             xfa_warnings: Vec::new(),
             edit_notices: Vec::new(),
@@ -4087,7 +4092,8 @@ impl Session {
                 // only those). The values before the edit tell a click from a value set again.
                 let before: std::collections::HashMap<String, Vec<String>> =
                     doc.form.iter().filter(|f| changed.contains(&f.name)).map(|f| (f.name.clone(), f.value.clone())).collect();
-                let ran = guard(|| xfa::on_changes(&mut next, &tpl, &changed, &before, &mut run, &mut exited))
+                let focus = doc.xfa_focus.clone();
+                let ran = guard(|| xfa::on_changes(&mut next, &tpl, &changed, &before, focus.as_deref(), &mut run, &mut exited))
                     .unwrap_or_else(|m| Err(format!("the form's scripts failed unexpectedly ({m})")));
                 cx.xfa_datasets = run.datasets;
                 cx.xfa_ran_away |= run.ran_away;

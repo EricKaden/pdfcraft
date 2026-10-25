@@ -874,13 +874,17 @@ const TOGGLE_ORDER: [&str; 2] = ["change", "click"];
 /// value stays, as Acrobat marks the field invalid rather than reverting it. `before` holds each
 /// field's value before the edit: a check box or radio group set to the value it had runs no
 /// click scripts, since nothing was clicked. A field named twice (a batch that sets it twice)
-/// is compared the second time with what the first left, so it is clicked once at most. The SOM
+/// is compared the second time with what the first left, so it is clicked once at most. A check
+/// box or radio group that has the focus (`focus`, the SOM path of its widget or of one of the
+/// group's buttons) runs no exit scripts here: it keeps the focus as it changes, and runs them
+/// once, when it loses it ([`crate::Session::field_focus`]), as another viewer does. The SOM
 /// paths whose exit scripts ran go into `exited`.
 pub(crate) fn on_changes(
     doc: &mut pdfcraft_cos::Document,
     tpl: &Template,
     names: &[String],
     before: &HashMap<String, Vec<String>>,
+    focus: Option<&str>,
     run: &mut XfaRun,
     exited: &mut Vec<String>,
 ) -> Result<(), String> {
@@ -903,9 +907,19 @@ pub(crate) fn on_changes(
                 }
             }
         }
+        // A text field's value is committed as it loses the focus, and a value set without the
+        // focus on the field (form_fill, a script) has no focus to lose: their exit follows.
+        let keeps_focus = focus.is_some_and(|at| {
+            use pdfcraft_forms::FieldKind as K;
+            r.fields().get(name).is_some_and(|f| match f.kind {
+                K::CheckBox => at == som,
+                K::Radio => at == som || f.buttons.iter().any(|(_, b)| b == at),
+                _ => false,
+            })
+        });
         // Each object's exit is noted only when one of its scripts ran: one the event's budget
         // skipped, or one an error before it stopped, is still to run when it loses focus.
-        for at in [button, Some(som.as_str())].into_iter().flatten() {
+        for at in [button, Some(som.as_str())].into_iter().flatten().filter(|_| !keeps_focus) {
             let mut ran_exit = false;
             for ev in r.events_of(at, "exit") {
                 ran_exit |= r.run(&ev, &value)?.is_some();

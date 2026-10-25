@@ -38,6 +38,16 @@ pub enum SaveTarget {
     As,
 }
 
+/// The edit queued on `v` sets the check box or radio group the focus is on (a click, Space or
+/// an arrow on it), rather than committing what was typed into a field.
+fn sets_the_focused_toggle(v: &crate::DocView) -> bool {
+    use pdfcraft_engine::FieldValue;
+    matches!(
+        (&v.pending_edit, &v.forms.focus),
+        (Some(Edit::SetFieldValue { name, value: FieldValue::Check(_) | FieldValue::Radio(_) }), Some(f)) if *name == f.name
+    )
+}
+
 /// Text typed into a new text box that isn't added to the page yet.
 fn new_text_typed(v: &crate::DocView) -> bool {
     v.content.draft.as_ref().is_some_and(|d| d.index.is_none() && !d.text.trim().is_empty())
@@ -256,9 +266,15 @@ impl PdfCraftApp {
     /// Returns false when a field refused the typing queued for it (its editor is open again).
     pub(crate) fn process_pending_edits(&mut self) -> bool {
         let Some(i) = self.active else { return true };
+        // A click (or Space, or an arrow) on a check box or radio button moves the focus to it
+        // before it changes it: the field left runs its exit and this one its enter, then its
+        // change and click scripts, as another viewer orders them. A value typed into the field
+        // the focus left is taken before the focus scripts run instead (its change runs that
+        // field's exit).
+        if self.views.get(i).is_some_and(sets_the_focused_toggle) {
+            self.run_focus_scripts(i);
+        }
         let applied = self.apply_queued_edit(i);
-        // After the queued edit: a value typed into the field the focus left has been taken (and
-        // its change has run the field's exit) before the focus scripts run.
         self.run_focus_scripts(i);
         if !applied {
             // Nor may a shortcut pressed with it (⌘S right after Enter) run behind the refusal.

@@ -5165,6 +5165,57 @@ fn a_radio_groups_own_enter_and_exit_run_when_the_focus_crosses_the_group() {
     assert_eq!(log(&s), "grp enter|r1 enter|r1 exit|r2 enter|r2 exit|grp exit", "out of the group");
 }
 
+/// The synthetic check box and radio group form ([`pdfcraft_xfa::fixtures::toggle_focus_template`])
+/// and the name of its field of kind `kind`.
+fn toggle_focus_form(kind: pdfcraft_forms::FieldKind) -> (Session, DocId, String) {
+    let mut s = Session::new();
+    let bytes = Arc::new(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::toggle_focus_template()));
+    let id = s.open("toggle.pdf", None, bytes, None).expect("opens");
+    let name = s.get(id).unwrap().form.iter().find(|f| f.kind == kind).map(|f| f.name.clone()).expect("the field");
+    (s, id, name)
+}
+
+/// A check box keeps the focus as it is clicked, so its exit runs once, when the focus leaves,
+/// not after each click: enter, then change and click for each click, then exit, as another
+/// viewer runs them on a synthetic form. Set without the focus on it (form_fill), its exit
+/// follows the change.
+#[test]
+fn a_check_box_clicked_with_the_focus_runs_its_exit_once_as_the_focus_leaves() {
+    use crate::js::FieldFocus::{Enter, Exit};
+    let (mut s, id, cb) = toggle_focus_form(pdfcraft_forms::FieldKind::CheckBox);
+    let log = |s: &Session| field_text(s, id, "log");
+    assert!(s.field_focus(id, &cb, 0, Enter).unwrap());
+    for on in [true, false] {
+        s.apply(id, Edit::SetFieldValue { name: cb.clone(), value: FieldValue::Check(on) }).unwrap();
+    }
+    assert_eq!(log(&s), "cb enter 0|cb change 1|cb click 1|cb change 0|cb click 0", "no exit while it has the focus");
+    assert!(s.field_focus(id, &cb, 0, Exit).unwrap());
+    assert_eq!(log(&s), "cb enter 0|cb change 1|cb click 1|cb change 0|cb click 0|cb exit 0", "one exit, as the focus leaves");
+    s.apply(id, Edit::SetFieldValue { name: cb.clone(), value: FieldValue::Check(true) }).unwrap();
+    assert!(log(&s).ends_with("|cb exit 0|cb change 1|cb click 1|cb exit 1"), "set without the focus: {}", log(&s));
+}
+
+/// A radio group keeps the focus as its buttons are clicked, in the order another viewer runs on
+/// a synthetic form: the group's change and click before the button's, the exits only as the
+/// focus moves to the other button (that button's alone) and out of the group (the button's,
+/// then the group's).
+#[test]
+fn a_radio_group_clicked_with_the_focus_runs_its_exits_as_the_focus_leaves() {
+    use crate::js::FieldFocus::{Enter, Exit};
+    let (mut s, id, grp) = toggle_focus_form(pdfcraft_forms::FieldKind::Radio);
+    let pick = |s: &mut Session, on: &str| s.apply(id, Edit::SetFieldValue { name: grp.clone(), value: FieldValue::Radio(Some(on.into())) }).unwrap();
+    assert!(s.field_focus(id, &grp, 0, Enter).unwrap());
+    pick(&mut s, "1");
+    s.field_focus_crossing(id, &grp, 0, Exit, false).unwrap();
+    s.field_focus_crossing(id, &grp, 1, Enter, false).unwrap();
+    pick(&mut s, "2");
+    s.field_focus(id, &grp, 1, Exit).unwrap();
+    assert_eq!(
+        field_text(&s, id, "log"),
+        "grp enter|r1 enter|grp change 1|r1 change|grp click 1|r1 click|r1 exit|r2 enter|grp change 2|r2 change|grp click 2|r2 click|r2 exit|grp exit"
+    );
+}
+
 /// A field's exit scripts run every time it loses focus, changed or not, and its enter scripts
 /// every time it gains it; each run that changes the form is one undo step.
 #[test]
@@ -5263,11 +5314,11 @@ fn on_changes_notes_only_the_exits_that_ran() {
     let mut exited = Vec::new();
     let mut out = crate::js::JsOutput::default();
     let mut stopped = crate::xfa::XfaRun { page_count: 1, out: &mut out, datasets: None, ran_away: true };
-    crate::xfa::on_changes(&mut cos, &tpl, &names, &before, &mut stopped, &mut exited).unwrap();
+    crate::xfa::on_changes(&mut cos, &tpl, &names, &before, None, &mut stopped, &mut exited).unwrap();
     assert!(exited.is_empty(), "no exit ran: {exited:?}");
     let mut out = crate::js::JsOutput::default();
     let mut running = crate::xfa::XfaRun { page_count: 1, out: &mut out, datasets: None, ran_away: false };
-    crate::xfa::on_changes(&mut cos, &tpl, &names, &before, &mut running, &mut exited).unwrap();
+    crate::xfa::on_changes(&mut cos, &tpl, &names, &before, None, &mut running, &mut exited).unwrap();
     assert_eq!(exited.len(), 1, "the exit ran: {exited:?}");
 }
 
@@ -5304,8 +5355,8 @@ fn a_widget_the_field_doesnt_have_runs_no_focus_scripts() {
 }
 
 /// Each radio button of a group is a field of its own: reaching the second button runs its
-/// enter script, reaching the first (which has none) runs nothing. Choosing the button runs its
-/// scripts after the group's, its exit with them, so leaving it doesn't run that exit again.
+/// enter script, reaching the first (which has none) runs nothing. Choosing the button while it
+/// has the focus runs its scripts after the group's, but its exit waits until the focus leaves.
 #[test]
 fn a_radio_buttons_own_focus_scripts_run() {
     use crate::js::FieldFocus::{Enter, Exit};
@@ -5317,8 +5368,8 @@ fn a_radio_buttons_own_focus_scripts_run() {
     assert!(!s.field_focus(id, &group, 2, Enter).unwrap(), "there is no third button");
     assert_eq!(field_text(&s, id, "picks"), "1");
     s.apply(id, Edit::SetFieldValue { name: group.clone(), value: FieldValue::Radio(Some("L".into())) }).unwrap();
-    assert_eq!(field_text(&s, id, "drops"), "1", "choosing the button ran its exit");
-    assert!(!s.field_focus(id, &group, 1, Exit).unwrap(), "so leaving it doesn't run it again");
+    assert_eq!(field_text(&s, id, "drops"), "0", "it still has the focus");
+    assert!(s.field_focus(id, &group, 1, Exit).unwrap(), "the button's exit runs on leaving it");
     assert_eq!(field_text(&s, id, "drops"), "1");
 }
 

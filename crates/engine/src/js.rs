@@ -271,9 +271,11 @@ impl Session {
 
     /// Widget `widget` of field `name` in document `id` gained or lost focus: on a laid-out XFA form,
     /// run the field's `enter` or `exit` scripts, as one undoable edit when they change something
-    /// (and none when they don't). An exit that the field's new value already ran (the value's
-    /// change runs it) isn't run a second time. For a radio button the focus also enters or leaves
-    /// its group ([`Session::field_focus_crossing`]). Returns whether the document changed; what the
+    /// (and none when they don't). An exit that the field's new value already ran isn't run a
+    /// second time: a text field's change runs it, as does a value set without the focus on the
+    /// field, while a check box or radio group set while it has the focus runs it only here. For
+    /// a radio button the focus also enters or leaves its group
+    /// ([`Session::field_focus_crossing`]). Returns whether the document changed; what the
     /// scripts showed or asked for is in [`Session::take_js_output`].
     pub fn field_focus(&mut self, id: DocId, name: &str, widget: usize, focus: FieldFocus) -> Result<bool, EditError> {
         self.field_focus_crossing(id, name, widget, focus, true)
@@ -297,6 +299,9 @@ impl Session {
             FieldFocus::Enter => "enter",
             FieldFocus::Exit => "exit",
         };
+        // Where the focus is now: a check box or radio group set while it has the focus runs its
+        // exit scripts when it loses it, not with the change.
+        doc.xfa_focus = (focus == FieldFocus::Enter).then(|| som.clone());
         let group = if crossing { crate::xfa::exclusion_group_of(cos, &tpl, &som) } else { None };
         let order: Vec<String> = match focus {
             FieldFocus::Enter => group.into_iter().chain(std::iter::once(som)).collect(),
