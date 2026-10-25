@@ -514,24 +514,26 @@ impl PdfCraftApp {
             let before: Option<(String, Vec<String>)> = edited
                 .as_ref()
                 .and_then(|e| self.session.get(id)?.form.iter().find(|f| &f.name == e).map(|f| (crate::forms_ui::draft_text(f), f.value.clone())));
-            match self.session.field_focus_crossing(id, &name, widget, focus, crossing) {
-                Ok(changed) => {
-                    if changed
-                        && let Some(info) = self.session.get(id).map(|d| d.info.clone())
-                        && let Some(view) = self.views.get_mut(i)
-                    {
-                        view.document_changed(&info);
-                        if let Some(before) = &before
-                            && let Some(draft) = view.forms.focus.as_mut()
-                            && let Some(f) = self.session.get(id).and_then(|d| d.form.iter().find(|f| f.name == draft.name))
-                        {
-                            crate::forms_ui::refresh_draft(draft, (&before.0, &before.1), (crate::forms_ui::draft_text(f), &f.value));
-                        }
-                    }
-                    let out = self.session.take_js_output(id);
-                    self.handle_js(id, out);
+            // Each object's scripts are an edit of their own, so one that fails after another ran
+            // (the button's, after its group's) leaves what ran before it, and what it showed.
+            let generation = self.session.get(id).map(|d| d.edit_generation());
+            let ran = self.session.field_focus_crossing(id, &name, widget, focus, crossing);
+            if self.session.get(id).map(|d| d.edit_generation()) != generation
+                && let Some(info) = self.session.get(id).map(|d| d.info.clone())
+                && let Some(view) = self.views.get_mut(i)
+            {
+                view.document_changed(&info);
+                if let Some(before) = &before
+                    && let Some(draft) = view.forms.focus.as_mut()
+                    && let Some(f) = self.session.get(id).and_then(|d| d.form.iter().find(|f| f.name == draft.name))
+                {
+                    crate::forms_ui::refresh_draft(draft, (&before.0, &before.1), (crate::forms_ui::draft_text(f), &f.value));
                 }
-                Err(e) => self.notify_error(e),
+            }
+            let out = self.session.take_js_output(id);
+            self.handle_js(id, out);
+            if let Err(e) = ran {
+                self.notify_error(e);
             }
         }
     }

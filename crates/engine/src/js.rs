@@ -313,6 +313,11 @@ impl Session {
         }
         let before = doc.generation;
         for som in run {
+            // A script that ran away turned the form's scripts off (the group's, say): the rest
+            // don't run, and the notice that says so is in the output.
+            if self.get(id).is_some_and(|d| d.xfa_template.is_none()) {
+                break;
+            }
             self.apply(id, Edit::XfaEvent { som, activity: activity.into() })?;
         }
         Ok(self.get(id).is_some_and(|d| d.generation != before))
