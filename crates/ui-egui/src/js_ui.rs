@@ -155,7 +155,11 @@ impl PdfCraftApp {
             // edited open: a push button's click closes it first, a trigger doesn't.
             if matches!(action, B::Reset { .. } | B::ShowHide { .. }) {
                 if let Some(edit) = crate::canvas::action_edit(self, i, &action) {
+                    let before = self.focus_before(i, id);
                     self.apply_edit(edit);
+                    // A reset of the field being edited shows in its editor, so leaving it
+                    // doesn't write the old text back.
+                    self.refresh_focus(i, id, before);
                 }
                 return;
             }
@@ -165,24 +169,17 @@ impl PdfCraftApp {
         if !self.session.javascript() {
             return;
         }
-        let draft = self.views.get(i).and_then(|v| v.forms.focus.as_ref()).map(|f| f.name.clone());
-        let before = draft
-            .as_ref()
-            .and_then(|e| self.session.get(id)?.form.iter().find(|f| &f.name == e).map(|f| (crate::forms_ui::draft_text(f), f.value.clone())));
+        let before = self.focus_before(i, id);
         let generation = self.session.get(id).map(|d| d.edit_generation());
         match self.session.run_field_script(id, &js, Some(name), trigger) {
             Ok(o) => {
-                if self.session.get(id).map(|d| d.edit_generation()) != generation
-                    && let Some(info) = self.session.get(id).map(|d| d.info.clone())
-                    && let Some(view) = self.views.get_mut(i)
-                {
-                    view.document_changed(&info);
-                    if let Some(before) = &before
-                        && let Some(draft) = view.forms.focus.as_mut()
-                        && let Some(f) = self.session.get(id).and_then(|d| d.form.iter().find(|f| f.name == draft.name))
+                if self.session.get(id).map(|d| d.edit_generation()) != generation {
+                    if let Some(info) = self.session.get(id).map(|d| d.info.clone())
+                        && let Some(view) = self.views.get_mut(i)
                     {
-                        crate::forms_ui::refresh_draft(draft, (&before.0, &before.1), (crate::forms_ui::draft_text(f), &f.value));
+                        view.document_changed(&info);
                     }
+                    self.refresh_focus(i, id, before);
                 }
                 let out = JsOutput {
                     alerts: o.alerts,
@@ -195,6 +192,22 @@ impl PdfCraftApp {
             }
             Err(e) => self.notify_fmt("{field}: {e}", &[("field", name), ("e", &e.to_string())]),
         }
+    }
+
+    /// The field being edited in view `i` of document `id`, as its editor text and its value, for
+    /// [`Self::refresh_focus`] after a change.
+    fn focus_before(&self, i: usize, id: DocId) -> Option<(String, Vec<String>)> {
+        let name = self.views.get(i)?.forms.focus.as_ref()?.name.clone();
+        self.session.get(id)?.form.iter().find(|f| f.name == name).map(|f| (crate::forms_ui::draft_text(f), f.value.clone()))
+    }
+
+    /// After a change to the form, the editor open in view `i` shows its field's new value, unless
+    /// the person has typed there since `before` ([`crate::forms_ui::refresh_draft`]).
+    fn refresh_focus(&mut self, i: usize, id: DocId, before: Option<(String, Vec<String>)>) {
+        let Some(before) = before else { return };
+        let Some(draft) = self.views.get_mut(i).and_then(|v| v.forms.focus.as_mut()) else { return };
+        let Some(f) = self.session.get(id).and_then(|d| d.form.iter().find(|f| f.name == draft.name)) else { return };
+        crate::forms_ui::refresh_draft(draft, (&before.0, &before.1), (crate::forms_ui::draft_text(f), &f.value));
     }
 
     /// Run a push button's JavaScript (its Mouse Up action).

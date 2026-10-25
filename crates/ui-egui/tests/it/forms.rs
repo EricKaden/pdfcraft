@@ -1667,6 +1667,61 @@ fn a_mouse_down_reset_keeps_the_text_typed_into_the_field_left() {
     assert!(value(&h, "other").iter().all(|v| v.is_empty()), "and the other field reset: {:?}", value(&h, "other"));
 }
 
+/// A field being edited, reset by another field's action while it stays open (the pointer
+/// entering a field whose Mouse Enter resets it): its editor shows the reset value, as after a
+/// script's change, so it doesn't go on showing the old text. Text typed there first stays the
+/// person's to commit.
+#[test]
+fn a_reset_of_the_field_being_edited_shows_in_its_editor() {
+    let bytes = pdf_from_objects(&[
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [4 0 R 5 0 R] /DA (/Helv 0 Tf 0 g) >> >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 300 400] >>",
+        "<< /Type /Page /Parent 2 0 R /Annots [4 0 R 5 0 R] >>",
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (edited) /V (old) /Rect [20 350 280 372] /P 3 0 R /F 4 >>",
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (resets) /Rect [20 300 280 322] /P 3 0 R /F 4 /AA << /E << /S /ResetForm /Fields [(edited)] >> >> >>",
+    ]);
+    let open = || {
+        let b = bytes.clone();
+        let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_cc| {
+            let mut app = PdfCraftApp::new();
+            app.set_option("language", "en").unwrap();
+            app.open_bytes("reset.pdf", None, b.clone()).unwrap();
+            app.set_option("left", "closed").unwrap();
+            app.set_option("zoom", "150").unwrap();
+            app
+        });
+        h.run_steps(6);
+        h
+    };
+    let editor = |h: &Harness<'static, PdfCraftApp>| h.state().views[0].forms.focus.as_ref().map(|f| (f.name.clone(), f.text.clone()));
+    let over_resets = |h: &mut Harness<'static, PdfCraftApp>| {
+        let p = {
+            let s = h.state();
+            let doc = s.session.get(s.views[0].id).unwrap();
+            let f = doc.form.iter().find(|f| f.name == "resets").unwrap();
+            pdfcraft_ui_egui::forms_ui::field_screen_rect(&s.views[0], &doc.info, f, 0).expect("on screen").center()
+        };
+        h.hover_at(p);
+        h.run_steps(3);
+    };
+    // Opened, not typed into: the reset shows in the editor.
+    let mut h = open();
+    click_field(&mut h, "edited", 0);
+    assert_eq!(editor(&h), Some(("edited".to_string(), "old".to_string())));
+    over_resets(&mut h);
+    assert!(value(&h, "edited").iter().all(|v| v.is_empty()), "reset: {:?}", value(&h, "edited"));
+    assert_eq!(editor(&h), Some(("edited".to_string(), String::new())), "the editor shows it");
+    // Typed into first: the typing stays in the editor.
+    let mut h = open();
+    click_field(&mut h, "edited", 0);
+    h.event(egui::Event::Text("new".into()));
+    h.run_steps(2);
+    let typed = editor(&h);
+    assert!(typed.as_ref().is_some_and(|(_, t)| t.contains("new")), "{typed:?}");
+    over_resets(&mut h);
+    assert_eq!(editor(&h), typed, "the typing stays");
+}
+
 /// Where the document's security doesn't allow filling in the form, the pointer passing over a
 /// field runs none of its actions, as a click on it runs none: a script there could only be
 /// refused, with a message on every pass.
