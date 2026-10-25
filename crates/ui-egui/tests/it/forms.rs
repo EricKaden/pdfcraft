@@ -327,6 +327,41 @@ fn page_keys_still_work_with_a_check_box_or_radio_button_focused() {
     assert_eq!((focused(&h), value(&h, "pick")), (None, vec!["B".to_string()]));
 }
 
+/// A push button scrolled out of view lets go of the focus, as a check box does: the page keys,
+/// which a focused button holds back, work again, and Escape or a click isn't needed to leave a
+/// button nothing shows.
+#[test]
+fn a_push_button_scrolled_out_of_view_lets_go_of_the_focus() {
+    let bytes = pdf_from_objects(&[
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [4 0 R] >> >>",
+        "<< /Type /Pages /Kids [3 0 R 5 0 R 6 0 R] /Count 3 /MediaBox [0 0 300 400] >>",
+        "<< /Type /Page /Parent 2 0 R /Annots [4 0 R] >>",
+        "<< /Type /Annot /Subtype /Widget /FT /Btn /Ff 65536 /T (go) /Rect [20 330 120 356] /P 3 0 R /F 4 >>",
+        "<< /Type /Page /Parent 2 0 R >>",
+        "<< /Type /Page /Parent 2 0 R >>",
+    ]);
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(|_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("go.pdf", None, bytes).unwrap();
+        app.set_option("left", "closed").unwrap();
+        app.set_option("zoom", "150").unwrap();
+        app
+    });
+    h.run_steps(6);
+    click_field(&mut h, "go", 0);
+    assert_eq!(focused(&h), Some(("go".into(), 0)), "a click focuses the button");
+    h.key_press(egui::Key::End);
+    h.run_steps(4);
+    assert_eq!(h.state().views[0].current, 2, "End goes to the last page");
+    assert!(h.state().views[0].page_screen_rect(0).is_none(), "where the button is out of view");
+    assert_eq!(focused(&h), None, "the button let go of the focus");
+    h.key_press(egui::Key::Home);
+    h.run_steps(4);
+    assert_eq!(h.state().views[0].current, 0);
+    assert_eq!(focused(&h), None, "and doesn't take it back when its page returns");
+}
+
 #[test]
 fn radio_buttons_take_tab_space_and_arrows() {
     let mut h = harness();
