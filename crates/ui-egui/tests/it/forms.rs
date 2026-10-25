@@ -1636,3 +1636,33 @@ fn only_a_click_runs_a_fields_print_action() {
     click_at(&mut h, p);
     assert!(h.state().dialog.is_some(), "a click on the field may print");
 }
+
+/// A press on a field whose Mouse Down action resets another keeps what was typed into the field
+/// the press leaves: the reset applies first and the typing is committed after it, rather than
+/// the reset taking the typing's place.
+#[test]
+fn a_mouse_down_reset_keeps_the_text_typed_into_the_field_left() {
+    let bytes = pdf_from_objects(&[
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [4 0 R 5 0 R 6 0 R] /DA (/Helv 0 Tf 0 g) >> >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 300 400] >>",
+        "<< /Type /Page /Parent 2 0 R /Annots [4 0 R 5 0 R 6 0 R] >>",
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (typed) /Rect [20 350 280 372] /P 3 0 R /F 4 >>",
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (resets) /Rect [20 300 280 322] /P 3 0 R /F 4 /AA << /D << /S /ResetForm /Fields [(other)] >> >> >>",
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (other) /V (kept until reset) /Rect [20 250 280 272] /P 3 0 R /F 4 >>",
+    ]);
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(|_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("reset.pdf", None, bytes).unwrap();
+        app.set_option("left", "closed").unwrap();
+        app.set_option("zoom", "150").unwrap();
+        app
+    });
+    h.run_steps(6);
+    click_field(&mut h, "typed", 0);
+    h.event(egui::Event::Text("x".into()));
+    h.run_steps(2);
+    click_field(&mut h, "resets", 0);
+    assert_eq!(value(&h, "typed"), ["x"], "the typing is kept");
+    assert!(value(&h, "other").iter().all(|v| v.is_empty()), "and the other field reset: {:?}", value(&h, "other"));
+}

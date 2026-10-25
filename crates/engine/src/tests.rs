@@ -5324,6 +5324,31 @@ fn only_a_clicks_trigger_scripts_may_print_open_links_or_save_as() {
     }
 }
 
+/// An XFA field's enter and exit scripts are held to the same rule as a field's Focus and Blur:
+/// only a click may print, open a link or Save As, so the focus moving does none of them, and
+/// says so on the console.
+#[test]
+fn xfa_focus_scripts_may_not_print_open_links_or_save_as() {
+    use crate::js::FieldFocus::{Enter, Exit};
+    let asks = r#"xfa.host.print(1, "0", "0", 0, 0, 0, 0, 0); xfa.host.gotoURL("https://example.com/"); app.execMenuItem("SaveAs");"#;
+    let tpl = pdfcraft_xfa::fixtures::focus_template().replace(
+        r#"<field name="quiet" w="2in" h="0.3in"><ui><textEdit/></ui><event activity="exit"><script contentType="application/x-javascript">xfa.host.messageBox("left quiet");</script></event></field>"#,
+        &format!(
+            r#"<field name="quiet" w="2in" h="0.3in"><ui><textEdit/></ui><event activity="enter"><script contentType="application/x-javascript">{asks}</script></event><event activity="exit"><script contentType="application/x-javascript">{asks}</script></event></field>"#
+        ),
+    );
+    assert_ne!(tpl, pdfcraft_xfa::fixtures::focus_template());
+    let mut s = Session::new();
+    let id = s.open("form.pdf", None, Arc::new(pdfcraft_xfa::fixtures::shell(&tpl)), None).expect("opens");
+    s.take_js_output(id);
+    for focus in [Enter, Exit] {
+        s.field_focus(id, "quiet", 0, focus).unwrap();
+        let out = s.take_js_output(id);
+        assert!(out.requests.is_empty(), "{focus:?}: {:?}", out.requests);
+        assert!(out.console.iter().filter(|c| c.contains("when a button is clicked")).count() >= 2, "{focus:?}: {:?}", out.console);
+    }
+}
+
 /// A field's exit scripts run every time it loses focus, changed or not, and its enter scripts
 /// every time it gains it; each run that changes the form is one undo step.
 #[test]
