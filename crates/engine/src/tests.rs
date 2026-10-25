@@ -8744,3 +8744,17 @@ fn need_appearances_buttons_are_displayed_from_their_captions() {
         assert!(ink(&shown, inside(x, 100)) > 700, "the file's square at {x}");
     }
 }
+
+/// A form saved with its pages whose signature box sits deeper than the 32 nested fields looked
+/// through counts as signed, as the xfa crate counts it, so it is left as saved rather than laid
+/// out again over a signature that may be there; nested less deep, unsigned, it is laid out.
+#[test]
+fn a_saved_form_too_deep_to_read_through_is_left_as_saved() {
+    let xfa = |depth: usize| {
+        let mut s = Session::new();
+        let id = s.open("deep.pdf", None, Arc::new(pdfcraft_xfa::fixtures::deep_saved_with_pages_shell(depth)), None).expect("opens");
+        s.get(id).unwrap().info.xfa
+    };
+    assert_eq!(xfa(5), Some(pdfcraft_render::Xfa::Dynamic), "nested, unsigned: laid out");
+    assert_eq!(xfa(40), Some(pdfcraft_render::Xfa::Static), "too deep to tell: left as saved");
+}

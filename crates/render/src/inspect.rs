@@ -893,9 +893,18 @@ impl<'a> Inspector<'a> {
             // rendered dynamically, is laid out from its template too: its fields live there.
             // Not once it is signed: the signature covers the pages as saved (the xfa crate's
             // `is_dynamic` keeps the same rule).
-            let signed = info.fields.iter().any(|f| f.kind == FieldKind::Signature && f.value.is_some());
+            let signed = self.signed_form(catalog);
             let required = render.as_deref() == Some("required") && !signed;
-            info.xfa = Some(if needs_rendering || required || (info.fields.is_empty() && !static_form) { Xfa::Dynamic } else { Xfa::Static });
+            // Whether the AcroForm lists any field, as the xfa crate's `has_fields` reads it, so
+            // both call the same forms dynamic: fields nested too deep to read through count.
+            let listed = catalog
+                .get(b"AcroForm")
+                .ok()
+                .and_then(|o| self.dict(o))
+                .and_then(|f| f.get(b"Fields").ok())
+                .and_then(|f| self.resolve(f).as_array().ok())
+                .is_some_and(|a| !a.is_empty());
+            info.xfa = Some(if needs_rendering || required || (!listed && !static_form) { Xfa::Dynamic } else { Xfa::Static });
         }
         self.layers(catalog, &mut info.layers);
         info.layer_groups = self.layer_groups(catalog);
@@ -1007,6 +1016,40 @@ impl<'a> Inspector<'a> {
             stream.content.get(..stream.content.len().min(MAX_XFA_CONFIG_BYTES))?.to_vec()
         };
         xfa_config_dynamic_render(&xfa_packet_text(&bytes))
+    }
+
+    /// Whether the form holds a signature field with a value, read as the xfa crate's
+    /// `has_signature` reads it so that both say the same of a form: down the field tree from the
+    /// AcroForm's `/Fields`, the field type inherited from the parent, and a tree deeper than 32
+    /// fields or larger than 10,000 taken as signed. A form too big to read through is then left
+    /// as saved rather than laid out again over a signature.
+    fn signed_form(&self, catalog: &'a Dictionary) -> bool {
+        let Some(acro) = catalog.get(b"AcroForm").ok().and_then(|o| self.dict(o)) else { return false };
+        let Some(fields) = acro.get(b"Fields").ok().and_then(|f| self.resolve(f).as_array().ok()) else { return false };
+        // (field, signature type inherited, depth)
+        let mut todo: Vec<(&Object, bool, usize)> = fields.iter().map(|f| (f, false, 0)).collect();
+        let mut seen = HashSet::new();
+        let mut budget = 10_000usize;
+        while let Some((f, sig_above, depth)) = todo.pop() {
+            if budget == 0 || depth > 32 {
+                return true;
+            }
+            if let Some(id) = self.resolved_id(f)
+                && !seen.insert(id)
+            {
+                continue;
+            }
+            budget -= 1;
+            let Some(d) = self.dict(f) else { continue };
+            let sig = d.get(b"FT").ok().and_then(|t| self.resolve(t).as_name().ok()).map_or(sig_above, |t| t == b"Sig");
+            if sig && d.get(b"V").ok().is_some_and(|v| !matches!(self.resolve(v), Object::Null)) {
+                return true;
+            }
+            if let Some(kids) = d.get(b"Kids").ok().and_then(|k| self.resolve(k).as_array().ok()) {
+                todo.extend(kids.iter().map(|k| (k, sig, depth + 1)));
+            }
+        }
+        false
     }
 
     fn resolve(&self, o: &'a Object) -> &'a Object {
