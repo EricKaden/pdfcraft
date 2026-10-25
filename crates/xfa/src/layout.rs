@@ -15,8 +15,8 @@ use base64::Engine;
 use crate::XfaError;
 use crate::data::{DataNode, data_date_letters, data_path, data_to_iso, date_letters, is_on, iso_to_pattern};
 use crate::model::{
-    Access, Area, Border, Common, Draw, ExclGroup, Field, Font, HAlign, Layout, Margin, Node, Occur, PageArea, PageRole, Para, Placement, Presence,
-    Rect, Script, SomIndices, Stroke, Subform, Template, Ui, VAlign, Value,
+    Access, Area, Border, Common, Draw, Edge, ExclGroup, Field, Font, HAlign, Layout, Margin, Node, Occur, PageArea, PageRole, Para, Placement,
+    Presence, Rect, Script, SomIndices, Stroke, Subform, Template, Ui, VAlign, Value,
 };
 use crate::text::{self, Block, Face, Span};
 
@@ -58,8 +58,8 @@ pub enum Item {
         color: [f64; 3],
         dashed: bool,
     },
-    /// A box with rounded (or inverted) corners: its fill, and its edge drawn inside it.
-    Rounded(Box<Rounded>),
+    /// A box whose corners reach along its edges: its fill, edges and corners ([`Cornered`]).
+    Cornered(Box<Cornered>),
     Text(Span),
     Image {
         rect: Rect,
@@ -69,21 +69,38 @@ pub enum Item {
     Widget(Box<Widget>),
 }
 
-/// A box with rounded corners ([`Item::Rounded`]).
+/// A line's width, colour and whether it is dashed.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Pen {
+    pub width: f64,
+    pub color: [f64; 3],
+    pub dashed: bool,
+}
+
+/// One corner of a [`Cornered`] box.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct CornerShape {
+    /// How far the corner reaches along the edges, at most half the box's shorter side.
+    pub radius: f64,
+    /// A quarter circle, rather than a right angle.
+    pub round: bool,
+    /// Turned into the box: a square notch, or a curve centred on the box's corner.
+    pub inverted: bool,
+    /// Its line, when the corner is shown.
+    pub line: Option<Pen>,
+}
+
+/// A box with corners of its own ([`Item::Cornered`]): its fill follows the corners' shapes,
+/// each shown edge runs between its two corners, and each shown corner is drawn with its own
+/// line, all inside the box.
 #[derive(Clone, Debug, PartialEq)]
-pub struct Rounded {
+pub struct Cornered {
     pub rect: Rect,
-    /// Top-left, top-right, bottom-right and bottom-left radii, each at most half the box's
-    /// shorter side.
-    pub radii: [f64; 4],
-    /// Corners whose curve goes into the box rather than around it, in the same order.
-    pub inverted: [bool; 4],
+    /// Top-left, top-right, bottom-right and bottom-left.
+    pub corners: [CornerShape; 4],
     pub fill: Option<[f64; 3]>,
-    /// The edge: its width, colour and whether it is dashed.
-    pub edge: Option<(f64, [f64; 3], bool)>,
-    /// A page break cut the box here: that side has no edge, and its corners are square.
-    pub open_top: bool,
-    pub open_bottom: bool,
+    /// Top, right, bottom and left: each shown edge's line.
+    pub edges: [Option<Pen>; 4],
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -409,7 +426,7 @@ fn solid_extent(item: &Item) -> Option<(f64, f64)> {
         Item::Text(s) => Some((s.baseline - s.face.size * 0.8, s.baseline + s.face.size * 0.2)),
         Item::Image { rect, .. } => Some((rect.y, rect.bottom())),
         Item::Widget(w) => Some((w.rect.y, w.rect.bottom())),
-        Item::Fill { .. } | Item::Line { .. } | Item::Rounded(_) => None,
+        Item::Fill { .. } | Item::Line { .. } | Item::Cornered(_) => None,
     }
 }
 
@@ -444,25 +461,42 @@ fn divide(item: Item, cut: f64) -> (Option<Item>, Option<Item>) {
                 (Some(Item::Line { from: lo, to: mid, width, color, dashed }), Some(Item::Line { from: mid, to: hi, width, color, dashed }))
             }
         }
-        Item::Rounded(r) => {
+        Item::Cornered(r) => {
             if r.rect.bottom() <= cut + 0.01 {
-                (Some(Item::Rounded(r)), None)
+                (Some(Item::Cornered(r)), None)
             } else if r.rect.y >= cut - 0.01 {
-                (None, Some(Item::Rounded(r)))
+                (None, Some(Item::Cornered(r)))
             } else {
-                // Each part keeps the corners on its side, rounded no more than its own height
-                // allows, and is open where it was cut.
-                let [tl, tr, br, bl] = r.radii;
+                // Each part keeps the corners on its side, reaching no further than its own
+                // height allows, and is open where it was cut: no edge there, and square corners.
+                let part = |rect: Rect, keep: [bool; 4], open: usize| {
+                    let mut p = Cornered { rect, ..(*r).clone() };
+                    for (c, k) in p.corners.iter_mut().zip(keep) {
+                        if k {
+                            c.radius = c.radius.min(rect.h.max(0.0));
+                        } else {
+                            *c = CornerShape::default();
+                        }
+                    }
+                    if let Some(e) = p.edges.get_mut(open) {
+                        *e = None;
+                    }
+                    Item::Cornered(Box::new(p))
+                };
                 let above = Rect::new(r.rect.x, r.rect.y, r.rect.w, cut - r.rect.y);
                 let below = Rect::new(r.rect.x, cut, r.rect.w, r.rect.bottom() - cut);
-                let fit = |v: f64, h: f64| v.min(h.max(0.0));
-                let upper = Rounded { rect: above, radii: [fit(tl, above.h), fit(tr, above.h), 0.0, 0.0], open_bottom: true, ..(*r).clone() };
-                let lower = Rounded { rect: below, radii: [0.0, 0.0, fit(br, below.h), fit(bl, below.h)], open_top: true, ..*r };
-                (Some(Item::Rounded(Box::new(upper))), Some(Item::Rounded(Box::new(lower))))
+                (Some(part(above, [true, true, false, false], 2)), Some(part(below, [false, false, true, true], 0)))
             }
         }
         other => (Some(other), None),
     }
+}
+
+/// The line edge (or corner) `e` is drawn with: its width kept to 0.1-20pt, and relief strokes
+/// (raised, lowered, etched, embossed) as a solid grey.
+fn pen(e: &Edge) -> Pen {
+    let color = if e.stroke == Stroke::Relief { [0.55, 0.55, 0.55] } else { e.color.0 };
+    Pen { width: e.thickness.clamp(0.1, 20.0), color, dashed: matches!(e.stroke, Stroke::Dashed | Stroke::Dotted) }
 }
 
 /// `item` moved by (`dx`, `dy`).
@@ -472,7 +506,7 @@ fn moved(mut item: Item, dx: f64, dy: f64) -> Item {
             rect.x += dx;
             rect.y += dy;
         }
-        Item::Rounded(r) => {
+        Item::Cornered(r) => {
             r.rect.x += dx;
             r.rect.y += dy;
         }
@@ -1651,31 +1685,20 @@ impl Layouter<'_> {
         }
     }
 
-    /// Draw border `b` around `rect`: its fill, then each shown edge as a line inside the box, or
-    /// the whole box as one rounded shape when its corners are rounded.
+    /// Draw border `b` around `rect`: its fill, then each shown edge as a line inside the box. A
+    /// box whose corners reach along its edges is one [`Cornered`] item instead (its fill
+    /// following the corners, its edges stopping short of them, each shown corner drawn with its
+    /// own line), unless every such corner is a right angle drawn as the edges are.
     fn draw_border(&mut self, b: &Border, rect: Rect) -> Result<(), XfaError> {
         let vis = b.visible_edges();
-        // Rounded corners: the box is one shape, filled and edged along its curves, when its
-        // edges are all alike (all shown and the same, or all hidden). Edges that differ keep
-        // square corners.
         let radii = b.radii(rect.w, rect.h);
-        let alike = b.edges.iter().all(|e| *e == b.edges[0]);
-        if radii.iter().any(|r| *r > 0.0) && (vis == [true; 4] && alike || vis == [false; 4]) {
-            let e = b.edges[0];
-            let edge = vis[0].then(|| {
-                let color = if e.stroke == Stroke::Relief { [0.55, 0.55, 0.55] } else { e.color.0 };
-                (e.thickness.clamp(0.1, 20.0), color, matches!(e.stroke, Stroke::Dashed | Stroke::Dotted))
+        if radii.iter().any(|r| *r > 0.0) && !b.plain() {
+            let corners = std::array::from_fn(|i| {
+                let (c, radius) = (b.corners[i], radii[i]);
+                CornerShape { radius, round: c.round, inverted: c.inverted, line: (radius > 0.0 && c.line.visible()).then(|| pen(&c.line)) }
             });
-            let shape = Rounded {
-                rect,
-                radii,
-                inverted: b.corners.map(|c| c.inverted),
-                fill: b.fill().map(|f| f.0),
-                edge,
-                open_top: false,
-                open_bottom: false,
-            };
-            return self.push(Item::Rounded(Box::new(shape)));
+            let edges = std::array::from_fn(|i| vis[i].then(|| pen(&b.edges[i])));
+            return self.push(Item::Cornered(Box::new(Cornered { rect, corners, fill: b.fill().map(|f| f.0), edges })));
         }
         if let Some(fill) = b.fill() {
             self.push(Item::Fill { rect, color: fill.0 })?;
@@ -1687,21 +1710,20 @@ impl Layouter<'_> {
             if !vis[i] {
                 continue;
             }
-            let e = b.edges[i];
-            let t = e.thickness.clamp(0.1, 20.0);
+            let p = pen(&b.edges[i]);
+            let t = p.width;
             let (dx, dy) = match i {
                 0 => (0.0, t / 2.0),
                 1 => (-t / 2.0, 0.0),
                 2 => (0.0, -t / 2.0),
                 _ => (t / 2.0, 0.0),
             };
-            let color = if e.stroke == Stroke::Relief { [0.55, 0.55, 0.55] } else { e.color.0 };
             self.push(Item::Line {
                 from: (seg.0.0 + dx, seg.0.1 + dy),
                 to: (seg.1.0 + dx, seg.1.1 + dy),
                 width: t,
-                color,
-                dashed: matches!(e.stroke, Stroke::Dashed | Stroke::Dotted),
+                color: p.color,
+                dashed: p.dashed,
             })?;
         }
         Ok(())
