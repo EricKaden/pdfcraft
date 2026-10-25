@@ -1665,3 +1665,38 @@ fn a_mouse_down_reset_keeps_the_text_typed_into_the_field_left() {
     assert_eq!(value(&h, "typed"), ["x"], "the typing is kept");
     assert!(value(&h, "other").iter().all(|v| v.is_empty()), "and the other field reset: {:?}", value(&h, "other"));
 }
+
+/// Where the document's security doesn't allow filling in the form, the pointer passing over a
+/// field runs none of its actions, as a click on it runs none: a script there could only be
+/// refused, with a message on every pass.
+#[test]
+fn hovering_a_form_that_may_not_be_filled_in_runs_nothing() {
+    let mut session = pdfcraft_engine::Session::new();
+    let id = session.open("triggers.pdf", None, std::sync::Arc::new(pdfcraft_engine::form_fixtures::trigger_form()), None).unwrap();
+    let protect =
+        pdfcraft_engine::Protection { permissions_password: Some("owner".into()), changes: pdfcraft_engine::Changes::None, ..Default::default() };
+    session.apply(id, pdfcraft_engine::Edit::Protect(protect)).unwrap();
+    let bytes = session.save_bytes(id).unwrap().as_ref().clone();
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("restricted.pdf", None, bytes).unwrap();
+        app.set_option("left", "closed").unwrap();
+        app.set_option("zoom", "100").unwrap();
+        app
+    });
+    crate::support::settle(&mut h);
+    assert!(!h.state().session.get(h.state().views[0].id).unwrap().allows_form_filling());
+    let p = {
+        let s = h.state();
+        let doc = s.session.get(s.views[0].id).unwrap();
+        let f = doc.form.iter().find(|f| f.name == "a").unwrap();
+        pdfcraft_ui_egui::forms_ui::field_screen_rect(&s.views[0], &doc.info, f, 0).expect("on screen").center()
+    };
+    h.hover_at(p);
+    h.run_steps(3);
+    h.hover_at(p - egui::vec2(0.0, 60.0));
+    h.run_steps(3);
+    assert!(value(&h, "log").iter().all(|v| v.is_empty()), "{:?}", value(&h, "log"));
+    assert_eq!(h.state().toast.as_ref().map(|t| t.0.clone()), None, "no message on hovering");
+}
