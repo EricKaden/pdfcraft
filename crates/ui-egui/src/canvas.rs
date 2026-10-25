@@ -385,9 +385,10 @@ pub(crate) fn snapshot_tab_name(title: &str, file_name: &str, snapshot: &Snapsho
 
 pub struct DocView {
     pub id: DocId,
-    /// The document and attached file this tab was opened from, when a form or the Attachments
-    /// panel opened it: asking for that attachment again comes back to this tab.
-    pub from_attachment: Option<(DocId, String)>,
+    /// The document and attached file this tab was opened from (where the file lives in it, and
+    /// its name), when a form or the Attachments panel opened it: asking for that attachment
+    /// again comes back to this tab.
+    pub from_attachment: Option<(DocId, pdfcraft_render::AttachmentSource, String)>,
     pub zoom: f32,
     pub fit: Fit,
     pub layout: PageLayout,
@@ -925,6 +926,7 @@ impl DocView {
         fresh.snapshot = self.snapshot.clone();
         fresh.close_requested = self.close_requested;
         fresh.cover = self.cover;
+        fresh.from_attachment = self.from_attachment.take();
         // Still presenting, with the display to go back to on leaving.
         fresh.presentation = self.presentation.take();
         fresh.back = std::mem::take(&mut self.back);
@@ -6159,6 +6161,18 @@ trailer << /Root 1 0 R >>
         assert_eq!(v.current, 3);
         assert!(v.back.is_empty());
         assert_eq!(v.forward, vec![4]);
+    }
+
+    /// A tab whose document is replaced (reloaded from its file) is still the tab opened from
+    /// its attachment, so asking for that attachment again comes back to it.
+    #[test]
+    fn a_replaced_document_keeps_the_attachment_its_tab_was_opened_from() {
+        let info = thumbnail_info(3);
+        let mut v = DocView::new(DocId(2), &info, ViewDefaults::default());
+        let origin = (DocId(1), pdfcraft_render::AttachmentSource::Annotation { page: 0, index: 1 }, "a.pdf".to_string());
+        v.from_attachment = Some(origin.clone());
+        v.document_replaced(&thumbnail_info(2));
+        assert_eq!(v.from_attachment, Some(origin));
     }
 
     #[test]

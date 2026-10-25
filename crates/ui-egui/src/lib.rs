@@ -1828,8 +1828,9 @@ impl PdfCraftApp {
                 // The tab name later names files written from the tab (Split, Extract pages).
                 let name = crate::files::attachment_file_name(&att.name);
                 // Already open: the tab opened from this attachment of this document (its bytes
-                // may have grown since, as a form laid out on open appends its layout).
-                let origin = (doc, att.name.clone());
+                // may have grown since, as a form laid out on open appends its layout). Where it
+                // lives tells apart two files of one name; the name, a file moved into its place.
+                let origin = (doc, att.source.clone(), att.name.clone());
                 let open_in = self.views.iter().position(|v| v.from_attachment.as_ref() == Some(&origin) && self.session.get(v.id).is_some());
                 if let Some(i) = open_in {
                     self.active = Some(i);

@@ -1537,6 +1537,78 @@ fn a_form_button_opens_its_attached_instructions_in_a_new_tab() {
     assert!(toast.chars().count() < 200, "{} characters", toast.chars().count());
 }
 
+/// A PDF of `pages` empty 100-point-square pages.
+fn small_pdf(pages: usize) -> String {
+    let kids: Vec<String> = (0..pages).map(|i| format!("{} 0 R", i + 3)).collect();
+    let mut out = format!(
+        "%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n2 0 obj << /Type /Pages /Kids [{}] /Count {pages} >> endobj\n",
+        kids.join(" ")
+    );
+    for i in 0..pages {
+        out.push_str(&format!("{} 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] >> endobj\n", i + 3));
+    }
+    out.push_str("trailer << /Root 1 0 R >>\n%%EOF");
+    out
+}
+
+/// A page with two attachment comments whose files are both named `a.pdf`: the first a one-page
+/// PDF, the second a two-page one.
+fn same_name_attachments() -> Vec<u8> {
+    let (one, two) = (small_pdf(1), small_pdf(2));
+    let objs = [
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Annots [4 0 R 5 0 R] >>".into(),
+        "<< /Type /Annot /Subtype /FileAttachment /Rect [20 20 40 40] /FS << /Type /Filespec /F (a.pdf) /UF (a.pdf) /EF << /F 6 0 R >> >> >>".into(),
+        "<< /Type /Annot /Subtype /FileAttachment /Rect [60 20 80 40] /FS << /Type /Filespec /F (a.pdf) /UF (a.pdf) /EF << /F 7 0 R >> >> >>".into(),
+        format!("<< /Type /EmbeddedFile /Length {} >>\nstream\n{one}\nendstream", one.len()),
+        format!("<< /Type /EmbeddedFile /Length {} >>\nstream\n{two}\nendstream", two.len()),
+    ];
+    let mut out = b"%PDF-1.7\n".to_vec();
+    let mut offs = Vec::new();
+    for (i, o) in objs.iter().enumerate() {
+        offs.push(out.len());
+        out.extend_from_slice(format!("{} 0 obj\n{o}\nendobj\n", i + 1).as_bytes());
+    }
+    let x = out.len();
+    out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+    for o in offs {
+        out.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    out.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{x}\n%%EOF\n", objs.len() + 1).as_bytes());
+    out
+}
+
+/// Two attached files of one name are two files: opening the second opens its own tab rather
+/// than going to the first's, and asking for the first again goes back to the first's tab.
+#[test]
+fn attached_files_of_one_name_open_in_tabs_of_their_own() {
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(|_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("comments.pdf", None, same_name_attachments()).unwrap();
+        app
+    });
+    h.run_steps(4);
+    let pages = |h: &Harness<'static, PdfCraftApp>| {
+        let s = h.state();
+        s.views.iter().filter_map(|v| s.session.get(v.id)).map(|d| d.info.pages.len()).collect::<Vec<_>>()
+    };
+    let id = h.state().views[0].id;
+    assert_eq!(h.state().session.get(id).unwrap().info.attachments.len(), 2, "both attachments are listed");
+    h.state_mut().comment_attachment_action(id, 0, 0, true);
+    h.run_steps(4);
+    h.state_mut().active = Some(0);
+    h.state_mut().comment_attachment_action(id, 0, 1, true);
+    h.run_steps(4);
+    assert_eq!(pages(&h), [1, 1, 2], "the second a.pdf opens in a tab of its own");
+    assert_eq!(h.state().active, Some(2));
+    h.state_mut().active = Some(0);
+    h.state_mut().comment_attachment_action(id, 0, 0, true);
+    h.run_steps(4);
+    assert_eq!((pages(&h).len(), h.state().active), (3, Some(1)), "the first a.pdf's own tab");
+}
+
 /// Two combo boxes of Apple and Banana: `fruit` editable (Combo and Edit, ISO 32000-2 Table 233),
 /// `veg` a drop-down list only.
 fn combo_form() -> Vec<u8> {
