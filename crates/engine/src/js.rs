@@ -299,6 +299,10 @@ impl Session {
             FieldFocus::Enter => "enter",
             FieldFocus::Exit => "exit",
         };
+        // The scripts the move reaches, from the live form built of the file's own template and
+        // data: behind the last-resort guard, and found before the focus state changes.
+        let targets = crate::guard(|| crate::xfa::focus_targets(cos, &tpl, &som, activity, crossing))
+            .map_err(|m| EditError::Invalid(format!("the form's focus scripts could not be found ({m})")))?;
         // Where the focus is now: a check box or radio group set while it has the focus runs its
         // exit scripts when it loses it, not with the change.
         doc.xfa_focus = (focus == FieldFocus::Enter).then(|| som.clone());
@@ -314,7 +318,7 @@ impl Session {
         // Which of them run, decided before any does: each edit forgets the exits a value's
         // change ran. Gaining focus starts afresh; losing it runs an exit unless the change just did.
         let mut run = Vec::new();
-        for (som, has) in crate::xfa::focus_targets(cos, &tpl, &som, activity, crossing) {
+        for (som, has) in targets {
             let ran = doc.xfa_exited.remove(&som);
             if has && !(ran && focus == FieldFocus::Exit) {
                 run.push(som);
