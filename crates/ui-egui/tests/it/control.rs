@@ -897,6 +897,8 @@ fn middle_button_pans_while_held_outside_linux() {
     assert!(!h.state().session.get(h.state().views[0].id).unwrap().dirty);
 }
 
+/// The control channel reports the open document, its page count and current page, and its
+/// view options can be set: the page, and a right-hand panel by name (an unknown one is refused).
 #[test]
 fn state_and_view_options() {
     let (mut h, c) = harness();
@@ -913,6 +915,9 @@ fn state_and_view_options() {
     assert!(call(&mut h, &c, "ui.set", json!({ "key": "panel", "value": "nonsense" })).is_err());
 }
 
+/// In a Japanese interface, the mode tabs and Preferences show Japanese labels, the command
+/// palette finds commands by their Japanese or English names or their ids, and switching back to
+/// English keeps the tabs working.
 #[test]
 fn japanese_controls_and_search_keep_command_ids() {
     if crate::support::skip_without_glyphs("japanese_controls_and_search_keep_command_ids", "ja", "") {
@@ -945,6 +950,9 @@ fn japanese_controls_and_search_keep_command_ids() {
     assert_eq!(ok(&mut h, &c, "ui.state", json!({}))["mode"], "AllTools");
 }
 
+/// In a German interface, the mode tabs and Preferences show German labels, the language
+/// selector switches to English and back, and the command palette finds Split document by its
+/// German name, its English name or its command id.
 #[test]
 fn german_preferences_and_search_keep_command_ids() {
     let (mut h, c) = harness();
