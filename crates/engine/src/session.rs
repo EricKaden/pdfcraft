@@ -299,8 +299,11 @@ impl Session {
                     // Undo/redo must rebuild these too instead of refreshing only field values.
                     scope = Scope::Full;
                     // A new layout: the form's layout:ready scripts run again, reading its page
-                    // count, as after a layout its scripts asked for.
-                    if let Some(tpl) = cx.xfa.clone() {
+                    // count, as after a layout its scripts asked for. Not after a script of this
+                    // edit ran away: the form's scripts turn off once it is done.
+                    if !cx.xfa_ran_away
+                        && let Some(tpl) = cx.xfa.clone()
+                    {
                         let highlight = cx.highlight();
                         let page_count = pdfcraft_organize::page_count(&next).unwrap_or(cx.pages);
                         let mut run = xfa::XfaRun {
