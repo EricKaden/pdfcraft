@@ -1010,6 +1010,10 @@ fn ukrainian_preferences_and_search_keep_command_ids() {
     assert_eq!(state["documents"][0]["name"], "doc.pdf");
 }
 
+/// In a Japanese interface, Preferences opened from the menu bar switches the language to English,
+/// Ukrainian and back, and opens again with Cmd+,; the shortcuts list then reads in Japanese and
+/// the document stays open. Preferences is in Edit on Windows and Linux, and in the app menu (as
+/// Settings…) on macOS.
 #[test]
 fn preferences_menu_and_shortcut_allow_switching_interface_languages() {
     if crate::support::skip_without_glyphs("preferences_menu_and_shortcut_allow_switching_interface_languages", "ja", "") {
