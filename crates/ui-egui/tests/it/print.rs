@@ -215,8 +215,6 @@ fn cut_stack_dialog_previews_saves_and_refuses_duplex() {
     let _ = std::fs::remove_file(out);
 }
 
-/// Save as PDF to a folder that doesn't exist keeps the Print dialog open, with its settings,
-/// and says why.
 #[test]
 fn a_failed_save_as_pdf_keeps_the_dialog_open() {
     let mut h = harness();
