@@ -326,6 +326,9 @@ pub enum Dialog {
     Revert,
     /// Save over a file that changed on disk since the document came from it (#2166).
     OverwriteChanged,
+    /// Save a document whose redaction marks aren't applied yet: what they cover is still in the
+    /// file (#4741).
+    RedactBeforeSave,
     /// Link Properties.
     LinkProps,
     /// Organize ▸ Extract (options), Rotate Pages.
@@ -798,6 +801,11 @@ pub struct PdfCraftApp {
     /// A save waiting behind [`Dialog::OverwriteChanged`] (the web build has no files to check).
     #[cfg(not(target_arch = "wasm32"))]
     pub pending_overwrite: Option<editing::PendingOverwrite>,
+    /// A save waiting behind [`Dialog::RedactBeforeSave`].
+    pub pending_redact_save: Option<editing::PendingRedactSave>,
+    /// The document, and its edit generation, whose redaction marks the user chose to save as
+    /// marks: saving it again unchanged doesn't ask again.
+    pub kept_redaction_marks: Option<(DocId, u64)>,
     /// Save to this path instead of asking (tests and automation).
     pub save_override: Option<String>,
     /// Document Properties ▸ Description fields being edited: (document, Title/Author/Subject/Keywords).
@@ -1189,6 +1197,8 @@ impl PdfCraftApp {
             save_prompt_attention: false,
             #[cfg(not(target_arch = "wasm32"))]
             pending_overwrite: None,
+            pending_redact_save: None,
+            kept_redaction_marks: None,
             save_override: None,
             props_draft: None,
             view_draft: None,

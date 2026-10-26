@@ -86,6 +86,8 @@ fn dialogs(app: &mut PdfCraftApp, ctx: &egui::Context) {
     let mut revert_now = false;
     let mut overwrite_now = false;
     let mut overwrite_elsewhere = false;
+    // Redact all and save (true) or Save with marks (false).
+    let mut redact_save: Option<bool> = None;
     let mut summarize_now = false;
     let mut optimize_now = false;
     let mut duplicate_now: Option<Edit> = None;
@@ -997,6 +999,52 @@ fn dialogs(app: &mut PdfCraftApp, ctx: &egui::Context) {
                 });
                 return;
             }
+            Dialog::RedactBeforeSave => {
+                let (name, marks) = app
+                    .pending_redact_save
+                    .as_ref()
+                    .and_then(|p| app.session.get(p.id))
+                    .map(|d| (d.name.clone(), d.redaction_marks()))
+                    .unwrap_or_default();
+                ui.label(egui::RichText::new(tl!("Apply the redaction marks before saving?")).font(theme::semibold(18.0)));
+                ui.add_space(8.0);
+                let said = if marks == 1 {
+                    crate::i18n::fmt(
+                        tl!(
+                            "“{name}” has a redaction mark that isn't applied yet. Until it is, the text and images under it stay in the file, where anyone can read or copy them."
+                        ),
+                        &[("name", &name)],
+                    )
+                } else {
+                    crate::i18n::fmt(
+                        tl!(
+                            "“{name}” has {n} redaction marks that aren't applied yet. Until they are, the text and images under them stay in the file, where anyone can read or copy them."
+                        ),
+                        &[("name", &name), ("n", &marks.to_string())],
+                    )
+                };
+                ui.label(said);
+                ui.add_space(4.0);
+                ui.label(
+                    egui::RichText::new(tl!("Redact all removes that content for good. Save with marks keeps them to apply later."))
+                        .color(t.text_muted),
+                );
+                ui.add_space(12.0);
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if widgets::pill_button(ui, tl!("Redact all and save"), true).clicked() {
+                        redact_save = Some(true);
+                        close = true;
+                    }
+                    if widgets::pill_button(ui, tl!("Save with marks"), false).clicked() {
+                        redact_save = Some(false);
+                        close = true;
+                    }
+                    if widgets::pill_button(ui, tl!("Cancel"), false).clicked() {
+                        close = true;
+                    }
+                });
+                return;
+            }
             Dialog::Print => {
                 let Some((i, id)) = app.active_ids() else {
                     close = true;
@@ -1588,6 +1636,14 @@ fn dialogs(app: &mut PdfCraftApp, ctx: &egui::Context) {
         app.bulk_field_props = None;
     } else {
         app.dialog = Some(next);
+    }
+    // Once the question is gone, so the save can ask its own (where to, overwrite a changed
+    // file). Dismissed, the save is dropped.
+    match redact_save {
+        Some(true) => app.redact_then_save(),
+        Some(false) => app.save_keeping_redaction_marks(),
+        None if dialog == Dialog::RedactBeforeSave && app.dialog != Some(Dialog::RedactBeforeSave) => app.pending_redact_save = None,
+        None => {}
     }
     if let Some(cmd) = link_command {
         app.execute(cmd);

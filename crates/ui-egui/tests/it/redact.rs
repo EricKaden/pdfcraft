@@ -74,6 +74,91 @@ fn marking_applying_and_clearing() {
     assert!(doc.form.is_empty(), "the whole page was redacted, fields included");
 }
 
+/// What a saved file holds: its redaction marks waiting to be applied, and its form fields
+/// (whole-page marks cover them, so applying them removes the fields).
+fn saved(path: &std::path::Path) -> (usize, usize) {
+    let mut s = pdfcraft_engine::Session::new();
+    let id = s.open("saved.pdf", None, std::sync::Arc::new(std::fs::read(path).unwrap()), None).unwrap();
+    let doc = s.get(id).unwrap();
+    (doc.redaction_marks(), doc.form.len())
+}
+
+/// Saving with redaction marks that aren't applied asks first (#4741): saved as they are, the
+/// marks only outline what they cover, and the text and fields under them stay in the file.
+/// Cancel writes nothing; Save with marks writes them as marks and doesn't ask again until the
+/// document changes; Redact all and save applies them, then writes the file without what they
+/// covered.
+#[test]
+fn saving_with_redaction_marks_not_applied_asks_first() {
+    let mut h = harness();
+    let dir = std::env::temp_dir().join(format!("pdfcraft-redact-save-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let out = dir.join("out.pdf");
+    let _ = std::fs::remove_file(&out);
+    h.state_mut().save_override = Some(out.to_string_lossy().into_owned());
+    let fields = h.state().session.get(h.state().views[0].id).unwrap().form.len();
+    assert!(fields > 0, "the fixture has form fields");
+    // Mark the whole page.
+    let mark_page = |h: &mut Harness<'static, PdfCraftApp>| {
+        h.state_mut().execute("redact.pages");
+        h.run_steps(2);
+        h.get_by_label("OK").click();
+        h.run_steps(3);
+    };
+    mark_page(&mut h);
+    assert_eq!(marks(&h), 1);
+    // Save asks; Cancel writes nothing.
+    h.state_mut().execute("file.save");
+    h.run_steps(3);
+    assert_eq!(h.state().dialog, Some(Dialog::RedactBeforeSave));
+    h.get_by_label("Redact all and save");
+    assert!(!out.exists(), "nothing is written while the question is open");
+    if let Ok(shots) = std::env::var("PDFCRAFT_SHOTS") {
+        let _gpu = crate::gpu();
+        for theme in ["light", "dark"] {
+            h.state_mut().set_option("theme", theme).unwrap();
+            h.run_steps(3);
+            h.render().unwrap().save(format!("{shots}/redact-before-save-{theme}.png")).unwrap();
+        }
+        h.state_mut().set_option("theme", "light").unwrap();
+        h.run_steps(2);
+    }
+    h.get_by_label("Cancel").click();
+    h.run_steps(3);
+    assert_eq!(h.state().dialog, None);
+    assert!(!out.exists(), "a cancelled save writes nothing");
+    assert!(h.state().pending_redact_save.is_none());
+    // Save with marks writes them as marks: the fields under them are still there.
+    h.state_mut().execute("file.save");
+    h.run_steps(3);
+    h.get_by_label("Save with marks").click();
+    h.run_steps(4);
+    assert_eq!(h.state().dialog, None);
+    assert_eq!(saved(&out), (1, fields), "the mark is saved unapplied, with what it covers");
+    // Saving the same document again doesn't ask again.
+    std::fs::remove_file(&out).unwrap();
+    h.state_mut().execute("file.save");
+    h.run_steps(3);
+    assert_eq!(h.state().dialog, None, "the marks were kept on purpose and nothing changed since");
+    assert_eq!(saved(&out), (1, fields));
+    // Another mark changes the document: Save asks again, and Redact all and save applies the
+    // marks before writing.
+    mark_page(&mut h);
+    assert_eq!(marks(&h), 2);
+    h.state_mut().execute("file.save");
+    h.run_steps(3);
+    assert_eq!(h.state().dialog, Some(Dialog::RedactBeforeSave));
+    h.get_by_label("Redact all and save").click();
+    h.run_steps(4);
+    assert_eq!(h.state().dialog, None);
+    assert_eq!(marks(&h), 0);
+    assert_eq!(saved(&out), (0, 0), "the saved file holds neither the marks nor what they covered");
+    let s = h.state();
+    let doc = s.session.get(s.views[0].id).unwrap();
+    assert!(!doc.dirty, "and the document is saved");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn redaction_codes_become_the_overlay_text() {
     let mut h = harness();
