@@ -4121,6 +4121,9 @@ fn redact_mark_respects_single_page_and_rejects_conflicting_selectors() {
     assert!(text[1].contains("Private"));
 }
 
+/// Marks by pattern, with an overlay and by text remove nothing until redact_apply, which removes
+/// exactly what they cover; the saved file keeps no trace of it, and a second apply or a mark
+/// that finds nothing fails.
 #[test]
 fn redacting_through_tools() {
     let dir = workdir("redact");
@@ -4166,8 +4169,8 @@ fn saving_with_redaction_marks_not_applied_says_so() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
-#[test]
 /// Mark, apply and save remove the complete international number while retaining labels and controls.
+#[test]
 fn redacting_italian_international_slash_numbers_through_tools() {
     let dir = workdir("redact-italian-international-slash");
     std::fs::write(dir.join("phones.txt"), "A tel. +39 0426/123456\nB tel. 0426/123456\nC protocol 2024/123456\nD on 01/10/2026").unwrap();

@@ -29,6 +29,8 @@ fn marks(h: &Harness<'static, PdfCraftApp>) -> usize {
     s.session.get(s.views[0].id).unwrap().redaction_marks()
 }
 
+/// The Redact tool's box and Redact pages each add a mark, Clear all removes them (and undo brings
+/// them back), and Redact all asks before applying them, which removes the fields under them.
 #[test]
 fn marking_applying_and_clearing() {
     let mut h = harness();
@@ -159,6 +161,8 @@ fn saving_with_redaction_marks_not_applied_asks_first() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Redaction codes picked in Redaction Tool Properties become the marks' overlay text, in the
+/// code set's order; turning codes off gives back the custom text, which was kept meanwhile.
 #[test]
 fn redaction_codes_become_the_overlay_text() {
     let mut h = harness();
