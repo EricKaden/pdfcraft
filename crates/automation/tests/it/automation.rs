@@ -7130,6 +7130,13 @@ fn xfa_date_fields_keep_typed_dates_as_another_viewer_does() {
             ok(&mut a, "doc_close", json!({ "doc": doc, "discard_changes": true }));
         }
     }
+    // What the fields show: an ISO date in the field's own date pattern (MM/DD/YYYY, YYYYMMDD),
+    // read from the appearances flattening draws into the page.
+    let doc = ok(&mut a, "doc_open", json!({ "path": "dates.pdf" }))["doc"].as_u64().unwrap();
+    ok(&mut a, "form_fill", json!({ "doc": doc, "values": { "edit": "2016-10-18", "either": "2016-10-18" } }));
+    ok(&mut a, "doc_flatten", json!({ "doc": doc, "comments": false, "fields": true }));
+    let text = ok(&mut a, "text_extract", json!({ "doc": doc }))["pages"][0]["text"].as_str().unwrap().to_string();
+    assert!(text.contains("10/18/2016") && text.contains("20161018") && !text.contains("2016-10-18"), "{text}");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
