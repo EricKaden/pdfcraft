@@ -6093,6 +6093,36 @@ fn layout_ready_scripts_run_again_after_text_grows_the_form() {
     assert_eq!(pages(&s), vec![after.to_string()], "layout:ready read the new page count");
 }
 
+/// An edit whose change script runs away runs no more of the form's scripts, even when its text
+/// lays the form out again: the layout:ready scripts that a new layout runs wait, and the scripts
+/// turn off once the edit is done.
+#[test]
+fn a_new_layout_after_a_runaway_change_script_runs_no_layout_ready_scripts() {
+    let template = pdfcraft_xfa::fixtures::growable_text_template(false)
+        .replacen(
+            "<pageSet>",
+            r#"<event activity="ready" ref="$layout"><script contentType="application/x-javascript">xfa.form.form.log.rawValue = (xfa.form.form.log.rawValue || "") + "L";</script></event><field name="log" w="1in" h="0.3in"><ui><textEdit/></ui></field><pageSet>"#,
+            1,
+        )
+        .replacen(
+            r#"<field name="ACTIVIDADES" w="540pt" minH="207.017mm">"#,
+            r#"<field name="ACTIVIDADES" w="540pt" minH="207.017mm"><event activity="exit"><script contentType="application/x-javascript">function f() { for (var j = 0; j &lt; 99999; j++) {} } for (var k = 0; k &lt; 5000; k++) f();</script></event>"#,
+            1,
+        );
+    let text: String = (0..150).map(|i| format!("Row{i:03} {}sample\n", "sample ".repeat(8))).collect();
+    let mut s = Session::new();
+    let id = s.open("growing.pdf", None, Arc::new(pdfcraft_xfa::fixtures::shell(&template)), None).unwrap();
+    let log = |s: &Session| s.get(id).unwrap().form.iter().find(|f| f.name == "log").map(|f| f.value.clone()).unwrap_or_default();
+    assert_eq!(log(&s), vec!["L".to_string()], "layout:ready ran once on opening");
+    let before = s.get(id).unwrap().info.pages.len();
+    s.apply(id, Edit::SetFieldValue { name: "ACTIVIDADES".into(), value: FieldValue::Text(text) }).unwrap();
+    assert_eq!(s.get(id).unwrap().info.pages.len(), before + 1, "the text still takes another page");
+    let out = s.take_js_output(id);
+    assert!(out.errors.iter().any(|e| e.contains("abandoned")), "{:?}", out.errors);
+    assert!(s.get(id).unwrap().xfa_scripts_off());
+    assert_eq!(log(&s), vec!["L".to_string()], "no layout:ready run after the runaway");
+}
+
 #[test]
 fn xfa_text_growth_refreshes_widget_geometry_but_fixed_height_fields_keep_their_widgets() {
     for fixed in [false, true] {
