@@ -373,6 +373,17 @@ pub fn cups_orientation(sheets: &[Sheet]) -> Option<(String, String)> {
     landscape.then(|| ("orientation-requested".to_string(), "4".to_string()))
 }
 
+/// Add [`cups_orientation`] to a CUPS job's `options`, for the Print dialog's jobs and
+/// `doc_print`'s alike, unless they already name an orientation (a driver choice, or one a
+/// caller passed): `lp` must not be given the option twice. Nothing on Windows, whose print
+/// ticket sets each sheet's orientation itself.
+pub fn add_cups_orientation(options: &mut Vec<(String, String)>, sheets: &[Sheet]) {
+    if cfg!(windows) || options.iter().any(|(k, _)| k == "orientation-requested") {
+        return;
+    }
+    options.extend(cups_orientation(sheets));
+}
+
 /// Whether most of page `index`'s text runs bottom-to-top as the page displays (a label laid
 /// sideways on a letter or A4 sheet), counting each text-showing operator once; form XObjects
 /// are followed a few levels deep.
