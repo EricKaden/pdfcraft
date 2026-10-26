@@ -977,6 +977,9 @@ fn german_preferences_and_search_keep_command_ids() {
     assert_eq!(ok(&mut h, &c, "ui.state", json!({}))["documents"][0]["name"], "doc.pdf");
 }
 
+/// In a Ukrainian interface, Preferences and dialogs show Ukrainian labels, the command palette
+/// finds Split document by its Ukrainian name, its English name or its command id, and a refused
+/// edit's notice names the command in Ukrainian.
 #[test]
 fn ukrainian_preferences_and_search_keep_command_ids() {
     let (mut h, c) = harness();
