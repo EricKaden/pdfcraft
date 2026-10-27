@@ -3059,6 +3059,45 @@ fn date_fields_are_shown_through_their_display_picture() {
     assert_eq!(action("none", b"F"), r#"AFDate_FormatEx("dd/mm/yyyy");"#);
 }
 
+/// A date field with a format action but no keystroke action (as another tool may lay one out)
+/// keeps its data in the format action's pattern: the date it shows is written to the datasets as
+/// ISO and read back in that pattern, rather than kept as text.
+#[test]
+fn a_date_field_without_a_keystroke_action_keeps_its_data_in_the_format_pattern() {
+    let xdp = r##"<?xml version="1.0" encoding="UTF-8"?>
+<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/">
+<template xmlns="http://www.xfa.org/schema/xfa-template/3.3/">
+<subform name="form" layout="tb">
+ <pageSet><pageArea name="page"><contentArea x="0.5in" y="0.5in" w="7.5in" h="10in"/><medium short="8.5in" long="11in"/></pageArea></pageSet>
+ <field name="when" w="2in" h="0.3in"><ui><dateTimeEdit/><picture>date{DD/MM/YYYY}</picture></ui><value><date/></value></field>
+</subform>
+</template>
+</xdp:xdp>
+"##;
+    let mut doc = Document::open(Arc::new(shell(xdp))).unwrap();
+    render_into(&mut doc).unwrap();
+    let mut fields = field_data(&doc);
+    let when = fields.iter().find(|f| f.name == "when").map(|f| f.obj).unwrap();
+    doc.update_dict(when, |d| {
+        let Some(Object::Dict(aa)) = d.get_mut(b"AA") else { panic!("the layout gives a date field its actions") };
+        assert!(aa.remove(b"K").is_some(), "a keystroke action to take away");
+        assert!(aa.get(b"F").is_some(), "the format action stays");
+    })
+    .unwrap();
+    for f in &mut fields {
+        if f.name == "when" {
+            f.data = FieldData::Text("18/10/2016".into());
+        }
+    }
+    let w = write_datasets(&mut doc, &fields).unwrap();
+    assert!(w.written && w.warnings.is_empty(), "{w:?}");
+    let p = read_packets(&doc).unwrap().unwrap();
+    let data = parse_datasets(&p.xdp).unwrap();
+    assert_eq!(data.text_at(&som_to_path("form[0].when[0]")), Some("2016-10-18"));
+    let values = read_values(&doc, &fields);
+    assert!(values.contains(&("when".to_string(), FieldData::Text("18/10/2016".into()))), "{values:?}");
+}
+
 /// Taking the XFA out makes each date field one a static form keeps working: held and typed as
 /// it shows, as another viewer checks typing against the keystroke pattern but reads the value
 /// again in the format's. Its keystroke takes the format's pattern and its value (held in the
