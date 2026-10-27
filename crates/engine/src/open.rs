@@ -27,6 +27,14 @@ pub struct PreparedDocument {
 }
 
 impl OpenContext {
+    /// This context with Highlight fields `on`, which the document's scripts read as
+    /// `app.runtimeHighlight` while it opens. A new document opens with the remembered setting
+    /// while the session keeps the one of the document in front, which its scripts read.
+    pub fn with_highlight(mut self, on: bool) -> Self {
+        self.highlight = on;
+        self
+    }
+
     /// Prepare a document without mutating the session that supplied this context.
     pub fn prepare_open(
         &self,
