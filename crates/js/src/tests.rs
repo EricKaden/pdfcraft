@@ -349,6 +349,7 @@ fn app_alert_falls_back_on_bad_icon_and_button_numbers() {
 /// budget: titles can't carry more text out than messages can.
 #[test]
 fn app_alert_titles_are_clipped_and_charged() {
+    use crate::host::Host;
     let m = alerted("'Hi', 0, 0, new Array(100000).join('t')");
     assert!(m.title.as_deref().is_some_and(|t| t.chars().count() <= 4_097), "{:?}", m.title.as_ref().map(String::len));
     // The title's bytes count against the budget with the text's, and a message the budget
