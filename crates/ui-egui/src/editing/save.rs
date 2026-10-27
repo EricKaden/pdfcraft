@@ -48,10 +48,17 @@ impl PdfCraftApp {
     /// [`Self::save_view`], then `after` once the document is written: now, or on a later frame
     /// when the user had to choose where. `after` never runs when the save fails or is cancelled.
     pub(crate) fn save_then(&mut self, index: usize, target: SaveTarget, after: impl FnOnce(&mut Self) + Send + 'static) -> bool {
+        self.save_then_checked(index, target, true, after)
+    }
+
+    /// [`Self::save_then`]; `check_marks` false skips the question about unapplied redaction
+    /// marks, for the save the user just answered it for.
+    fn save_then_checked(&mut self, index: usize, target: SaveTarget, check_marks: bool, after: impl FnOnce(&mut Self) + Send + 'static) -> bool {
         // A redaction mark only outlines what it covers until it is applied: saved as it is, the
         // text and images under it stay in the file for anyone to read (#4741). Ask first, unless
         // these marks were already kept on purpose and nothing changed since.
-        if let Some(id) = self.views.get(index).map(|v| v.id)
+        if check_marks
+            && let Some(id) = self.views.get(index).map(|v| v.id)
             && let Some(doc) = self.session.get(id)
             && doc.redaction_marks() > 0
             && self.kept_redaction_marks != Some((id, doc.edit_generation()))
@@ -190,14 +197,16 @@ impl PdfCraftApp {
 
     /// [`Dialog::RedactBeforeSave`](crate::Dialog::RedactBeforeSave)'s Save with marks: write the
     /// marks as they are, for applying later, and don't ask again until the document changes.
+    /// Only a save that writes counts: one cancelled on the way (the Save As picker, or the
+    /// question about a file changed on disk) leaves the next Save asking again, as does that
+    /// question's Save as…, which starts the save over.
     pub(crate) fn save_keeping_redaction_marks(&mut self) {
         let Some(p) = self.pending_redact_save.take() else { return };
         let Some(index) = self.views.iter().position(|v| v.id == p.id) else { return };
         let (id, after) = (p.id, p.after);
-        self.kept_redaction_marks = self.session.get(id).map(|d| (id, d.edit_generation()));
-        // Writing the file moves the document's generation on: note the marks as kept at the
-        // one it is saved at.
-        self.save_then(index, p.target, move |app| {
+        // The marks are noted as kept once the file is written, at the generation it is saved
+        // at (writing moves the document's generation on).
+        self.save_then_checked(index, p.target, false, move |app| {
             app.kept_redaction_marks = app.session.get(id).map(|d| (id, d.edit_generation()));
             after(app);
         });
