@@ -1,4 +1,11 @@
-use super::*;
+#[cfg(test)]
+use super::check_refresh_panic;
+use super::{
+    Arc, DocId, Document, Edit, EditCtx, EditError, Label, MAX_UNDO, ObjectKind, OnceLock, RenderPool, SaveOptions, Scope, Session,
+    XFA_REMOVED_PREFIX, XFA_SCRIPTS_OFF, check_permission, comment_list, display_bytes, guard, info_fields, inspect, js, keys_after, note_warnings,
+    render_threads, run_edit, scan_colours, scope_of, shown_under_redactions, signatures_of, sync_xfa_state, undrawn_notices, uses_scripts,
+    write_incremental, xfa, xfa_sync_datasets,
+};
 
 impl Session {
     /// Apply an edit. On success the previous state is undoable and the view data is refreshed.
@@ -59,12 +66,7 @@ impl Session {
         // nothing unsaved); what they showed or asked for still goes out. Only an event on its own:
         // a batch keeps the other edits it holds.
         if cx.xfa_unchanged && matches!(edit, Edit::XfaEvent { .. }) {
-            doc.js_output.append(cx.xfa_out);
-            if cx.xfa_ran_away {
-                doc.xfa_template = None;
-                doc.xfa_scripts_off = true;
-                doc.js_output.errors.push(XFA_SCRIPTS_OFF.into());
-            }
+            take_xfa_output(doc, cx.xfa_out, cx.xfa_ran_away);
             return Ok(());
         }
         // Redaction removed what its own interpreter places under the marks. The marks were drawn
@@ -228,12 +230,7 @@ impl Session {
         if let Some(js) = cx.js {
             doc.js_output.append(js.output);
         }
-        doc.js_output.append(cx.xfa_out);
-        if cx.xfa_ran_away {
-            doc.xfa_template = None;
-            doc.xfa_scripts_off = true;
-            doc.js_output.errors.push(XFA_SCRIPTS_OFF.into());
-        }
+        take_xfa_output(doc, cx.xfa_out, cx.xfa_ran_away);
         Ok(())
     }
 
@@ -545,5 +542,16 @@ impl Session {
         doc.renderer = RenderPool::new(doc.display.clone(), render_threads(), doc.config.clone());
         doc.bytes = bytes;
         Ok(())
+    }
+}
+
+/// Hand on what an edit's XFA scripts showed or asked for (`out`), and when one of them ran away,
+/// turn the form's scripts off and say so.
+fn take_xfa_output(doc: &mut Document, out: js::JsOutput, ran_away: bool) {
+    doc.js_output.append(out);
+    if ran_away {
+        doc.xfa_template = None;
+        doc.xfa_scripts_off = true;
+        doc.js_output.errors.push(XFA_SCRIPTS_OFF.into());
     }
 }
