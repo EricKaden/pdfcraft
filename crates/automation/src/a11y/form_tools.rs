@@ -85,7 +85,9 @@ impl Automation {
         let changed = self.session.field_focus(id, name, widget, focus).map_err(failed)?;
         let out = self.session.take_js_output(id);
         let reqs: Vec<Value> = out.requests.iter().map(request_json).collect();
-        Ok(json!({ "changed": changed, "alerts": out.alerts.iter().map(alert_json).collect::<Vec<_>>(), "console": out.console, "requests": reqs, "errors": out.errors }))
+        Ok(
+            json!({ "changed": changed, "alerts": out.alerts.iter().map(alert_json).collect::<Vec<_>>(), "console": out.console, "requests": reqs, "errors": out.errors }),
+        )
     }
 
     /// `form_keystroke`: one keystroke in text field `field` (its 1-based `widget`): `change`
@@ -127,7 +129,9 @@ impl Automation {
         let text = ks.applied(entered.as_deref().unwrap_or(&ks.change));
         let out = self.session.take_js_output(id);
         let reqs: Vec<Value> = out.requests.iter().map(request_json).collect();
-        Ok(json!({ "entered": entered, "text": text, "alerts": out.alerts.iter().map(alert_json).collect::<Vec<_>>(), "console": out.console, "requests": reqs, "errors": out.errors }))
+        Ok(
+            json!({ "entered": entered, "text": text, "alerts": out.alerts.iter().map(alert_json).collect::<Vec<_>>(), "console": out.console, "requests": reqs, "errors": out.errors }),
+        )
     }
 
     /// `form_merge_data`: merge the form data files at `paths` into one CSV at `path`, a row per
