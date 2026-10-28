@@ -932,12 +932,24 @@ impl Keystroke {
     }
 }
 
+/// The longest text, in characters, a field's change scripts are shown (the field's text and what
+/// was typed or pasted into it): as long as a value a script may set. Longer text is kept as
+/// typed, without them.
+const KEYSTROKE_TEXT_MAX: usize = 65_536;
+
 /// A keystroke in the laid-out field at `som`: its change scripts run, each seeing what the one
 /// before it left in `xfa.event.change`, as another viewer runs them for every keystroke. Returns
-/// what the keystroke enters once they ran, `None` when the field has none. The scripts run on a
-/// copy of `doc`: only what they enter, and what they show or ask for (`run`'s output), is kept.
-/// Their other changes come when the value is committed, which runs the change scripts again.
+/// what the keystroke enters once they ran, `None` when the field has none or the text is too
+/// long for them ([`KEYSTROKE_TEXT_MAX`]; the console says so). The scripts run on a copy of
+/// `doc`: only what they enter, and what they show or ask for (`run`'s output), is kept. Their
+/// other changes come when the value is committed, which runs the change scripts again.
 pub(crate) fn keystroke(doc: &pdfcraft_cos::Document, tpl: &Template, som: &str, ks: &Keystroke, run: &mut XfaRun) -> Result<Option<String>, String> {
+    if ks.prev.chars().count().saturating_add(ks.change.chars().count()) > KEYSTROKE_TEXT_MAX {
+        run.out
+            .console
+            .push(format!("{som}: the field's change scripts were not run: its text would be longer than {KEYSTROKE_TEXT_MAX} characters"));
+        return Ok(None);
+    }
     let mut scratch = doc.clone();
     let mut r = Runner::new(&mut scratch, tpl, run, EVENT_BUDGET_MS);
     let events = r.events_of(som, "change");

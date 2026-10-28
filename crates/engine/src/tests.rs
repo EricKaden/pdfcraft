@@ -5752,7 +5752,8 @@ fn an_xfa_form_without_a_template_opens_with_its_placeholder_and_a_warning() {
 /// Each keystroke in a laid-out text field runs the field's change scripts, which see it as another
 /// viewer gives it (what was typed, the text before and after, the selection it replaced) and may
 /// rewrite what it enters: digits only, capitals in FormCalc. A field without change scripts says
-/// so, and nothing in the document changes.
+/// so, and nothing in the document changes. Text longer than a value a script may set is kept as
+/// typed, without them.
 #[test]
 fn xfa_change_scripts_see_and_rewrite_each_keystroke() {
     use crate::xfa::Keystroke;
@@ -5774,6 +5775,15 @@ fn xfa_change_scripts_see_and_rewrite_each_keystroke() {
         assert_eq!(s.take_js_output(id).alerts, vec![want.to_string()]);
     }
     assert_eq!(s.get(id).unwrap().generation, generation, "keystrokes change nothing in the document");
+    // Text longer than a value a script may set is kept as typed: the change scripts don't see it
+    // (they would turn it upper case), and the console says why.
+    let long = "a".repeat(70_000);
+    for k in [ks("", &long, 0, 0), ks(&long, "b", 70_000, 70_000)] {
+        let entered = s.field_keystroke(id, "upper", 0, &k).unwrap();
+        assert!(entered.is_none(), "{} characters: the scripts ran", k.prev.len() + k.change.len());
+        let out = s.take_js_output(id);
+        assert!(out.console.iter().any(|c| c.contains("change scripts were not run")), "{:?}", out.console);
+    }
 }
 
 #[test]
