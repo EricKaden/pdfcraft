@@ -88,7 +88,9 @@ impl Automation {
         let changed = self.session.field_focus_crossing(id, name, widget, focus, crossing).map_err(failed)?;
         let out = self.session.take_js_output(id);
         let reqs: Vec<Value> = out.requests.iter().map(request_json).collect();
-        Ok(json!({ "changed": changed, "alerts": out.alerts.iter().map(alert_json).collect::<Vec<_>>(), "console": out.console, "requests": reqs, "errors": out.errors }))
+        Ok(
+            json!({ "changed": changed, "alerts": out.alerts.iter().map(alert_json).collect::<Vec<_>>(), "console": out.console, "requests": reqs, "errors": out.errors }),
+        )
     }
 
     /// `form_merge_data`: merge the form data files at `paths` into one CSV at `path`, a row per
