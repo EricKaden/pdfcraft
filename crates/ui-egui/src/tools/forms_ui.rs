@@ -14,8 +14,7 @@ use egui::{Color32, CornerRadius, Pos2, Rect, Stroke, vec2};
 use pdfcraft_engine::{Edit, FieldValue, FormField, FormFieldKind, FormWidget, field_flags, form_appearance};
 use pdfcraft_render::DocInfo;
 
-use crate::canvas::{DocView, PageXform};
-use crate::page_pointer::PagePointer;
+use crate::canvas::{DocView, PageToolContext, PageXform};
 use crate::theme::Tokens;
 
 const FOCUS_BLUE: Color32 = Color32::from_rgb(0x14, 0x73, 0xE6);
@@ -176,18 +175,8 @@ pub(crate) enum FieldPointer {
 }
 
 /// Clicks on form widgets of one page.
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn page_input(
-    ui: &egui::Ui,
-    resp: &egui::Response,
-    xf: &PageXform,
-    ptr: &PagePointer,
-    page: usize,
-    info: &DocInfo,
-    form: &[FormField],
-    allowed: bool,
-    view: &mut DocView,
-) -> FieldPointer {
+pub(crate) fn page_input(cx: PageToolContext<'_>, form: &[FormField], allowed: bool, view: &mut DocView) -> FieldPointer {
+    let PageToolContext { ui, resp, xf, ptr, page, info, .. } = cx;
     let Some(p) = ptr.within(xf.rect) else { return FieldPointer::Away };
     let hit = form.iter().find_map(|f| {
         f.widgets
@@ -330,8 +319,17 @@ pub(crate) fn commit(view: &mut DocView, form: &[FormField]) {
 
 /// The text box of an editable combo box, over the field. What is typed becomes the value when
 /// Enter, Tab or a click away commits it; a pick from the list still sets an option.
-#[allow(clippy::too_many_arguments)]
-fn combo_editor(ctx: &egui::Context, view: &mut DocView, form: &[FormField], f: &FormField, w: &FormWidget, rect: Rect, zoom: f32, widget: usize) {
+struct ComboEditor<'a> {
+    form: &'a [FormField],
+    field: &'a FormField,
+    widget: &'a FormWidget,
+    rect: Rect,
+    zoom: f32,
+    index: usize,
+}
+
+fn combo_editor(ctx: &egui::Context, view: &mut DocView, editor: ComboEditor<'_>) {
+    let ComboEditor { form, field: f, widget: w, rect, zoom, index: widget } = editor;
     let mut enter = false;
     egui::Area::new(egui::Id::unique(("form-editor", view.id.0)))
         .fade_in(false)
@@ -634,6 +632,173 @@ pub(crate) fn text_box(doc: &pdfcraft_engine::Document, view: &DocView, form: &[
     no_scroll.then(|| doc.field_text_box(&fx.name, fx.widget)).flatten()
 }
 
+/// After the text editor is drawn: keeps a field that doesn't scroll within what fits, puts the
+/// caret where the press that opened the editor landed, and takes focus when asked.
+fn settle_text_editor(
+    ui: &mut egui::Ui,
+    fx: &mut Focus,
+    r: &egui::Response,
+    primary_down: bool,
+    laid_out: Option<(std::sync::Arc<egui::Galley>, Pos2)>,
+    fitted: Option<(&form_appearance::TextBox, String)>,
+) {
+    if let Some((tb, before)) = fitted
+        && fx.text != before
+    {
+        let (kept, caret) = tb.fitted_edit(&before, &fx.text);
+        if kept != fx.text {
+            fx.text = kept;
+            if let Some(mut st) = egui::TextEdit::load_state(ui.ctx(), r.id) {
+                st.cursor.set_char_range(Some(egui::text::CCursorRange::one(egui::text::CCursor::new(caret))));
+                st.store(ui.ctx(), r.id);
+            }
+            ui.ctx().request_repaint();
+        }
+    }
+    if let Some(press) = fx.press.take()
+        && let Some((galley, pos)) = laid_out
+        && let Some(mut st) = egui::TextEdit::load_state(ui.ctx(), r.id)
+    {
+        // The press went to the page, not to this editor, which did not exist yet.
+        let at = galley.cursor_from_pos(press - pos + vec2(galley.rect.left(), 0.0));
+        st.cursor.set_char_range(Some(egui::text::CCursorRange::one(at)));
+        st.store(ui.ctx(), r.id);
+        if primary_down {
+            ui.ctx().set_dragged_id(r.id);
+        }
+    }
+    if fx.request_focus {
+        r.request_focus();
+        fx.request_focus = false;
+        if std::mem::take(&mut fx.select_all)
+            && let Some(mut st) = egui::TextEdit::load_state(ui.ctx(), r.id)
+        {
+            let n = fx.text.chars().count();
+            st.cursor.set_char_range(Some(egui::text::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(n))));
+            st.store(ui.ctx(), r.id);
+        }
+    }
+}
+
+/// Tab / Shift+Tab: commits the field and moves to the next fillable widget in the document's tab
+/// order, returning the edit to apply (the commit's, or `edit`).
+fn tab_to_next_field(view: &mut DocView, form: &[FormField], f: &FormField, widget: usize, forward: bool, edit: Option<Edit>) -> Option<Edit> {
+    commit(view, form);
+    let pending = view.pending_edit.take();
+    // The next Tab stop, check boxes, radio buttons (#2223) and read-only fields included, in
+    // the document's tab order (each page's /Tabs: rows, columns or structure), wrapping.
+    let mut order: Vec<(usize, &FormField, usize)> =
+        form.iter().flat_map(|x| x.widgets.iter().enumerate().filter(|(_, w)| tab_stop(x, w)).map(move |(wi, w)| (w.tab, x, wi))).collect();
+    order.sort_by_key(|o| o.0);
+    if let Some(pos) =
+        order.iter().position(|(_, x, wi)| x.name == f.name && *wi == widget).or_else(|| order.iter().position(|(_, x, _)| x.name == f.name))
+    {
+        let k = if forward { (pos + 1) % order.len() } else { (pos + order.len() - 1) % order.len() };
+        let (_, target, wi) = order[k];
+        view.forms.focus = Some(Focus { select_all: true, ..open_focus(target, wi) });
+        if let Some(p) = target.widgets[wi].page
+            && view.page_screen_rect(p).is_none()
+        {
+            view.go_to_page(p);
+        }
+    }
+    edit.or(pending)
+}
+
+/// The arrows move to the group's next or previous button that Tab stops at and that can be
+/// chosen (never a protected or read-only one) and select it, wrapping.
+fn step_radio(view: &mut DocView, f: &FormField, widget: usize, forward: bool) -> Option<Edit> {
+    let mut edit = None;
+    // A read-only button stays a Tab stop, but the arrows pass it by.
+    let stops: Vec<usize> = f.widgets.iter().enumerate().filter(|(_, w)| tab_stop(f, w) && !w.read_only).map(|(i, _)| i).collect();
+    if let Some(pos) = stops.iter().position(|&i| i == widget) {
+        let k = if forward { (pos + 1) % stops.len() } else { (pos + stops.len() - 1) % stops.len() };
+        if let Some((wi, target)) = stops.get(k).and_then(|&wi| Some((wi, f.widgets.get(wi)?))) {
+            view.forms.focus = Some(open_focus(f, wi));
+            edit = select_edit(f, target);
+            if let Some(p) = target.page
+                && view.page_screen_rect(p).is_none()
+            {
+                view.go_to_page(p);
+            }
+        }
+    }
+    edit
+}
+
+/// A check box, radio button or read-only field (`locked`) with the focus, as [`overlay`] holds it.
+struct HeldField<'a> {
+    field: &'a FormField,
+    widget: &'a FormWidget,
+    /// The widget's index in its field.
+    index: usize,
+    /// Where the widget is on screen.
+    rect: Rect,
+    /// Read-only: Tab stops on it, but nothing changes it.
+    locked: bool,
+    /// A click on the box asked to turn it.
+    toggle: bool,
+    /// A click landed outside the widget.
+    clicked_outside: bool,
+}
+
+/// The focus on a check box or radio button, or on a read-only field of any kind: nothing is drawn
+/// over it, but a widget there holds egui's keyboard focus, so Space, Tab and the arrows come here
+/// instead of turning or scrolling the page. Returns whether the focus closes, the way Tab moves
+/// it (`Some(forward)`), and the edit a click, Space or an arrow makes (none for a read-only field).
+fn hold_focus(ctx: &egui::Context, view: &mut DocView, held: HeldField<'_>) -> (bool, Option<bool>, Option<Edit>) {
+    let HeldField { field: f, widget: w, index, rect, locked, toggle, clicked_outside } = held;
+    let id = egui::Id::unique(("form-field", view.id.0, &f.name, index));
+    let mut has_focus = false;
+    // Not interactable, so clicks still reach the page under it.
+    let area = egui::Area::new(egui::Id::unique(("form-toggle", view.id.0))).order(egui::Order::Foreground).interactable(false);
+    area.fixed_pos(rect.min).show(ctx, |ui| {
+        let r = ui.interact(rect, id, egui::Sense::focusable_noninteractive());
+        if let Some(fx) = view.forms.focus.as_mut()
+            && std::mem::take(&mut fx.request_focus)
+        {
+            r.request_focus();
+        }
+        let filter = egui::EventFilter { tab: true, horizontal_arrows: true, vertical_arrows: true, escape: false };
+        ui.memory_mut(|m| m.set_focus_lock_filter(id, filter));
+        has_focus = r.has_focus();
+    });
+    view.forms.keys = Some((id, f.kind == FormFieldKind::Radio && !locked));
+    let (esc, tab, shift) = ctx.input(|i| (i.key_pressed(egui::Key::Escape), i.key_pressed(egui::Key::Tab), i.modifiers.shift));
+    let space = has_focus && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Space));
+    let arrow = has_focus && f.kind == FormFieldKind::Radio && !locked;
+    let step = ctx.input(|i| {
+        if !arrow {
+            None
+        } else if i.key_pressed(egui::Key::ArrowRight) || i.key_pressed(egui::Key::ArrowDown) {
+            Some(true)
+        } else if i.key_pressed(egui::Key::ArrowLeft) || i.key_pressed(egui::Key::ArrowUp) {
+            Some(false)
+        } else {
+            None
+        }
+    });
+    if esc || clicked_outside {
+        return (true, None, None);
+    } else if tab {
+        return (false, Some(!shift), None);
+    } else if locked {
+        // Space was taken so it doesn't scroll the page; it, a click and the arrows
+        // change nothing here.
+    } else if toggle && view.pending_edit.is_some() {
+        view.forms.toggle = true;
+    } else if toggle {
+        return (false, None, toggle_edit(f, w));
+    } else if space {
+        // Space toggles a check box and selects a radio button, as in browsers: it never
+        // turns the selected button off.
+        return (false, None, if f.kind == FormFieldKind::Radio { select_edit(f, w) } else { toggle_edit(f, w) });
+    } else if let Some(forward) = step {
+        return (false, None, step_radio(view, f, index, forward));
+    }
+    (false, None, None)
+}
+
 /// The in-place editor or option list for the focused field. Returns an edit to apply.
 /// `text_box`, for a text field that doesn't scroll, is how its widget lays text out: the editor
 /// then takes no more than fits.
@@ -642,11 +807,12 @@ pub(crate) fn overlay(
     view: &mut DocView,
     info: &DocInfo,
     form: &[FormField],
+    primary_down: bool,
     text_box: Option<&form_appearance::TextBox>,
     today: (i64, u32, u32),
 ) -> Option<Edit> {
     let pressed = view.forms.pressed;
-    if !ctx.input(|i| i.pointer.primary_down()) {
+    if !primary_down {
         view.forms.pressed = false;
     }
     let toggle = std::mem::take(&mut view.forms.toggle);
@@ -727,42 +893,7 @@ pub(crate) fn overlay(
                         })
                         // The form field's own logical name; not a visual/preordered label.
                         .accessible_name(f.name.clone());
-                    if let (Some(tb), Some(before)) = (text_box, before)
-                        && fx.text != before
-                    {
-                        let (kept, caret) = tb.fitted_edit(&before, &fx.text);
-                        if kept != fx.text {
-                            fx.text = kept;
-                            if let Some(mut st) = egui::TextEdit::load_state(ui.ctx(), r.id) {
-                                st.cursor.set_char_range(Some(egui::text::CCursorRange::one(egui::text::CCursor::new(caret))));
-                                st.store(ui.ctx(), r.id);
-                            }
-                            ui.ctx().request_repaint();
-                        }
-                    }
-                    if let Some(press) = fx.press.take()
-                        && let Some((galley, pos)) = laid_out
-                        && let Some(mut st) = egui::TextEdit::load_state(ui.ctx(), r.id)
-                    {
-                        // The press went to the page, not to this editor, which did not exist yet.
-                        let at = galley.cursor_from_pos(press - pos + vec2(galley.rect.left(), 0.0));
-                        st.cursor.set_char_range(Some(egui::text::CCursorRange::one(at)));
-                        st.store(ui.ctx(), r.id);
-                        if ui.input(|i| i.pointer.primary_down()) {
-                            ui.ctx().set_dragged_id(r.id);
-                        }
-                    }
-                    if fx.request_focus {
-                        r.request_focus();
-                        fx.request_focus = false;
-                        if std::mem::take(&mut fx.select_all)
-                            && let Some(mut st) = egui::TextEdit::load_state(ui.ctx(), r.id)
-                        {
-                            let n = fx.text.chars().count();
-                            st.cursor.set_char_range(Some(egui::text::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(n))));
-                            st.store(ui.ctx(), r.id);
-                        }
-                    }
+                    settle_text_editor(ui, fx, &r, primary_down, laid_out, text_box.zip(before));
                     let lost = crate::edit_text_ui::lost_focus_once(&r, &mut fx.had_focus);
                     let (enter, esc, tab, shift) = ui.input(|i| {
                         (i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape), i.key_pressed(egui::Key::Tab), i.modifiers.shift)
@@ -799,7 +930,7 @@ pub(crate) fn overlay(
             // An editable combo box has a text box over the field as well as its list (ISO
             // 32000-2 Table 233, Edit).
             if editable_combo(f) {
-                combo_editor(ctx, view, form, f, w, rect, zoom, focus.widget);
+                combo_editor(ctx, view, ComboEditor { form, field: f, widget: w, rect, zoom, index: focus.widget });
             }
             let resp = egui::Area::new(egui::Id::unique(("form-choices", view.id.0)))
                 .order(egui::Order::Foreground)
@@ -858,72 +989,12 @@ pub(crate) fn overlay(
             }
         }
         kind if locked || matches!(kind, FormFieldKind::CheckBox | FormFieldKind::Radio) => {
-            // Nothing is drawn over the box, but a widget there holds egui's keyboard focus, so
-            // Space, Tab and the arrows come here instead of turning or scrolling the page. A
-            // read-only field of any kind is held the same way, with nothing to change.
-            let id = egui::Id::unique(("form-field", view.id.0, &f.name, focus.widget));
-            let mut has_focus = false;
-            // Not interactable, so clicks still reach the page under it.
-            let area = egui::Area::new(egui::Id::unique(("form-toggle", view.id.0))).order(egui::Order::Foreground).interactable(false);
-            area.fixed_pos(rect.min).show(ctx, |ui| {
-                let r = ui.interact(rect, id, egui::Sense::focusable_noninteractive());
-                if let Some(fx) = view.forms.focus.as_mut()
-                    && std::mem::take(&mut fx.request_focus)
-                {
-                    r.request_focus();
-                }
-                let filter = egui::EventFilter { tab: true, horizontal_arrows: true, vertical_arrows: true, escape: false };
-                ui.memory_mut(|m| m.set_focus_lock_filter(id, filter));
-                has_focus = r.has_focus();
-            });
-            view.forms.keys = Some((id, f.kind == FormFieldKind::Radio && !locked));
-            let (esc, tab, shift) = ctx.input(|i| (i.key_pressed(egui::Key::Escape), i.key_pressed(egui::Key::Tab), i.modifiers.shift));
-            let space = has_focus && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Space));
-            let arrow = has_focus && f.kind == FormFieldKind::Radio && !locked;
-            let step = ctx.input(|i| {
-                if !arrow {
-                    None
-                } else if i.key_pressed(egui::Key::ArrowRight) || i.key_pressed(egui::Key::ArrowDown) {
-                    Some(true)
-                } else if i.key_pressed(egui::Key::ArrowLeft) || i.key_pressed(egui::Key::ArrowUp) {
-                    Some(false)
-                } else {
-                    None
-                }
-            });
-            if esc || clicked_outside() {
-                close = true;
-            } else if tab {
-                next = Some(!shift);
-            } else if locked {
-                // Space was taken so it doesn't scroll the page; it, a click and the arrows
-                // change nothing here.
-            } else if toggle && view.pending_edit.is_some() {
-                view.forms.toggle = true;
-            } else if toggle {
-                edit = toggle_edit(f, w);
-            } else if space {
-                // Space toggles a check box and selects a radio button, as in browsers: it never
-                // turns the selected button off.
-                edit = if f.kind == FormFieldKind::Radio { select_edit(f, w) } else { toggle_edit(f, w) };
-            } else if let Some(forward) = step {
-                // The arrows move to the group's next or previous button that Tab stops at and
-                // that can be chosen (never a protected or read-only one) and select it, wrapping.
-                // A read-only button stays a Tab stop.
-                let stops: Vec<usize> = f.widgets.iter().enumerate().filter(|(_, w)| tab_stop(f, w) && !w.read_only).map(|(i, _)| i).collect();
-                if let Some(pos) = stops.iter().position(|&i| i == focus.widget) {
-                    let k = if forward { (pos + 1) % stops.len() } else { (pos + stops.len() - 1) % stops.len() };
-                    if let Some((wi, target)) = stops.get(k).and_then(|&wi| Some((wi, f.widgets.get(wi)?))) {
-                        view.forms.focus = Some(open_focus(f, wi));
-                        edit = select_edit(f, target);
-                        if let Some(p) = target.page
-                            && view.page_screen_rect(p).is_none()
-                        {
-                            view.go_to_page(p);
-                        }
-                    }
-                }
-            }
+            // Nothing is drawn over the box, but a widget there holds the keyboard ([`hold_focus`]).
+            let held = HeldField { field: f, widget: w, index: focus.widget, rect, locked, toggle, clicked_outside: clicked_outside() };
+            let (closes, tab, made) = hold_focus(ctx, view, held);
+            close |= closes;
+            next = next.or(tab);
+            edit = edit.or(made);
         }
         _ => close = true,
     }
@@ -931,28 +1002,7 @@ pub(crate) fn overlay(
         view.forms.focus = None;
     }
     if let Some(forward) = next {
-        commit(view, form);
-        let pending = view.pending_edit.take();
-        // The next Tab stop, check boxes, radio buttons (#2223) and read-only fields included, in
-        // the document's tab order (each page's /Tabs: rows, columns or structure), wrapping.
-        let mut order: Vec<(usize, &FormField, usize)> =
-            form.iter().flat_map(|x| x.widgets.iter().enumerate().filter(|(_, w)| tab_stop(x, w)).map(move |(wi, w)| (w.tab, x, wi))).collect();
-        order.sort_by_key(|o| o.0);
-        if let Some(pos) = order
-            .iter()
-            .position(|(_, x, wi)| x.name == f.name && *wi == focus.widget)
-            .or_else(|| order.iter().position(|(_, x, _)| x.name == f.name))
-        {
-            let k = if forward { (pos + 1) % order.len() } else { (pos + order.len() - 1) % order.len() };
-            let (_, target, wi) = order[k];
-            view.forms.focus = Some(Focus { select_all: true, ..open_focus(target, wi) });
-            if let Some(p) = target.widgets[wi].page
-                && view.page_screen_rect(p).is_none()
-            {
-                view.go_to_page(p);
-            }
-        }
-        edit = edit.or(pending);
+        edit = tab_to_next_field(view, form, f, focus.widget, forward, edit);
     }
     edit.or_else(|| view.pending_edit.take())
 }
