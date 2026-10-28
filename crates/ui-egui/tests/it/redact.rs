@@ -161,6 +161,46 @@ fn saving_with_redaction_marks_not_applied_asks_first() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Save with marks holds for each document until it changes: keeping a second document's marks
+/// doesn't make the first ask again, and neither do later saves of either, though each write moves
+/// its document's generation on.
+#[test]
+fn save_with_marks_holds_for_each_document_until_it_changes() {
+    let mut h = harness();
+    let dir = std::env::temp_dir().join(format!("pdfcraft-redact-each-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let (a, b) = (dir.join("a.pdf"), dir.join("b.pdf"));
+    let save = |h: &mut Harness<'static, PdfCraftApp>, view: usize, out: &std::path::Path| {
+        h.state_mut().active = Some(view);
+        h.state_mut().save_override = Some(out.to_string_lossy().into_owned());
+        h.run_steps(2);
+        h.state_mut().execute("file.save");
+        h.run_steps(3);
+    };
+    let mark_and_keep = |h: &mut Harness<'static, PdfCraftApp>, view: usize, out: &std::path::Path| {
+        h.state_mut().active = Some(view);
+        h.run_steps(2);
+        h.state_mut().execute("redact.pages");
+        h.run_steps(2);
+        h.get_by_label("OK").click();
+        h.run_steps(3);
+        save(h, view, out);
+        assert_eq!(h.state().dialog, Some(Dialog::RedactBeforeSave), "view {view} asks first");
+        h.get_by_label("Save with marks").click();
+        h.run_steps(4);
+        assert_eq!(h.state().dialog, None);
+    };
+    mark_and_keep(&mut h, 0, &a);
+    h.state_mut().open_bytes("other.pdf", None, include_bytes!("../data/form.pdf").to_vec()).unwrap();
+    crate::support::settle(&mut h);
+    mark_and_keep(&mut h, 1, &b);
+    for (view, out) in [(0, &a), (1, &b), (0, &a), (1, &b)] {
+        save(&mut h, view, out);
+        assert_eq!(h.state().dialog, None, "view {view}: its marks were kept and nothing changed since");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// Redaction codes picked in Redaction Tool Properties become the marks' overlay text, in the
 /// code set's order; turning codes off gives back the custom text, which was kept meanwhile.
 #[test]

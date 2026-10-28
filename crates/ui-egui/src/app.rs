@@ -128,7 +128,7 @@ impl PdfCraftApp {
             #[cfg(not(target_arch = "wasm32"))]
             pending_overwrite: None,
             pending_redact_save: None,
-            kept_redaction_marks: None,
+            kept_redaction_marks: Default::default(),
             save_override: None,
             props_draft: None,
             view_draft: None,

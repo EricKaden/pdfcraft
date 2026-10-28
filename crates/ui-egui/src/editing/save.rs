@@ -61,12 +61,28 @@ impl PdfCraftApp {
             && let Some(id) = self.views.get(index).map(|v| v.id)
             && let Some(doc) = self.session.get(id)
             && doc.redaction_marks() > 0
-            && self.kept_redaction_marks != Some((id, doc.edit_generation()))
+            && self.kept_redaction_marks.get(&id) != Some(&doc.edit_generation())
         {
             self.pending_redact_save = Some(PendingRedactSave { id, target, after: Box::new(after) });
             self.dialog = Some(crate::Dialog::RedactBeforeSave);
             return false;
         }
+        // Marks kept on purpose stay kept for what this save writes, although writing moves the
+        // document's generation on.
+        let kept = self
+            .views
+            .get(index)
+            .and_then(|v| self.session.get(v.id).map(|d| (v.id, d.edit_generation())))
+            .filter(|(id, generation)| self.kept_redaction_marks.get(id) == Some(generation))
+            .map(|(id, _)| id);
+        let after = move |app: &mut Self| {
+            if let Some(id) = kept
+                && let Some(generation) = app.session.get(id).map(|d| d.edit_generation())
+            {
+                app.kept_redaction_marks.insert(id, generation);
+            }
+            after(app);
+        };
         // What's typed in a field is part of what's saved (#166).
         if let Some(id) = self.views.get(index).map(|v| v.id)
             && !self.commit_typing_in(id)
@@ -207,7 +223,9 @@ impl PdfCraftApp {
         // The marks are noted as kept once the file is written, at the generation it is saved
         // at (writing moves the document's generation on).
         self.save_then_checked(index, p.target, false, move |app| {
-            app.kept_redaction_marks = app.session.get(id).map(|d| (id, d.edit_generation()));
+            if let Some(generation) = app.session.get(id).map(|d| d.edit_generation()) {
+                app.kept_redaction_marks.insert(id, generation);
+            }
             after(app);
         });
     }

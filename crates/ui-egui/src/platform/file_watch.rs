@@ -634,7 +634,7 @@ mod tests {
         app.dialog = None;
         app.pending_overwrite = None;
         assert_eq!(std::fs::read(&path).unwrap(), changed, "a cancelled save writes nothing");
-        assert!(app.kept_redaction_marks.is_none(), "marks a save didn't write aren't kept");
+        assert!(app.kept_redaction_marks.is_empty(), "marks a save didn't write aren't kept");
         assert!(!app.save_active(SaveTarget::InPlace));
         assert_eq!(app.dialog, Some(crate::Dialog::RedactBeforeSave), "the next Save asks about the marks again");
     }
