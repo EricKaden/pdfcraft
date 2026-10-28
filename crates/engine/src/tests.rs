@@ -4808,6 +4808,8 @@ fn scripted_form_with(helpers: &str) -> Vec<u8> {
     out
 }
 
+/// AcroForm field scripts validate, calculate and format through edits, and a button script's
+/// changes, messages and requests come back.
 #[test]
 fn form_javascript_validates_calculates_and_formats() {
     let mut s = Session::new().with_clock(|| 1_700_000_000);
@@ -4826,7 +4828,7 @@ fn form_javascript_validates_calculates_and_formats() {
     // A button script changes fields in one undoable step, and asks for a page.
     let o =
         s.run_javascript(id, "getField('price').value = 3; getField('total').readonly = true; app.alert('Done'); this.print();", Some("go")).unwrap();
-    assert_eq!(o.alerts, ["Done"]);
+    assert_eq!(o.alerts, [crate::js::Message::plain("Done")]);
     assert_eq!(o.requests, [js::Request::Print]);
     assert_eq!(value(&s, "total"), ["12"], "recalculated after the change");
     assert!(s.get(id).unwrap().form.iter().find(|f| f.name == "total").unwrap().read_only());
@@ -4890,17 +4892,17 @@ fn active_xfa_does_not_run_pdf_container_scripts_but_keeps_requested_alerts() {
     assert!(s.take_js_output(id).alerts.is_empty());
     let out = s.run_javascript(id, "app.alert('Console message');", None).unwrap();
     assert!(out.error.is_none(), "{out:?}");
-    assert_eq!(out.alerts, ["Console message"]);
+    assert_eq!(out.alerts, [js::Message::plain("Console message")]);
     assert_eq!(s.get(id).unwrap().document_scripts(), [("viewerFallback".into(), fallback.into())]);
     let out = s.run_javascript(id, "", Some("hello")).unwrap();
     assert!(out.error.is_none(), "{out:?}");
-    assert_eq!(out.alerts, ["Hello 2"]);
+    assert_eq!(out.alerts, [js::Message::plain("Hello 2")]);
     assert_eq!(out.requests, [js::Request::Print]);
     // The same context rule applies to format/validate/calculate through JsRunner.
     s.apply(id, Edit::SetFieldScript { name: "qty".into(), event: "validate".into(), script: Some("app.alert('Field message');".into()) }).unwrap();
     s.take_js_output(id);
     s.apply(id, Edit::SetFieldValue { name: "qty".into(), value: FieldValue::Text("3".into()) }).unwrap();
-    assert_eq!(s.take_js_output(id).alerts, ["Field message"]);
+    assert_eq!(s.take_js_output(id).alerts, [js::Message::plain("Field message")]);
     // Saved XFA keeps its container scripts for inspection, but does not execute them.
     let saved = s.get(id).unwrap().bytes.clone();
     let reopened = s.open("saved.pdf", None, saved, None).unwrap();
@@ -4925,7 +4927,7 @@ fn active_xfa_without_template_scripts_does_not_initialize_pdf_fallback_scripts(
     s.apply(id, Edit::SetDocumentScript { name: "fallback".into(), script: Some("throw new Error('PDF fallback ran');".into()) }).unwrap();
     let out = s.run_javascript(id, "app.alert('Console message');", None).unwrap();
     assert!(out.error.is_none(), "{out:?}");
-    assert_eq!(out.alerts, ["Console message"]);
+    assert_eq!(out.alerts, [js::Message::plain("Console message")]);
 }
 
 #[test]
@@ -4942,7 +4944,7 @@ fn inactive_xfa_and_ordinary_pdfs_keep_document_helpers_and_alerts() {
         let out = pdfcraft_js::run("twice(3)", &pdfcraft_js::Event::doc("Console"), &runner.doc, &[], &runner.doc_scripts, Default::default());
         assert!(out.error.is_none(), "{out:?}");
         assert_eq!(out.result.as_deref(), Some("6"));
-        assert_eq!(out.alerts, ["PDF message"]);
+        assert_eq!(out.alerts, [js::Message::plain("PDF message")]);
     }
 }
 
@@ -5575,7 +5577,7 @@ fn validate_runs_before_exit_and_a_list_box_validates_as_the_focus_leaves() {
     s.apply(id, Edit::SetFieldValue { name: "listFails".into(), value: FieldValue::Choice(vec!["Apple".into()]) }).unwrap();
     assert!(s.take_js_output(id).alerts.is_empty(), "not yet");
     assert!(s.field_focus(id, "listFails", 0, Exit).is_ok());
-    assert_eq!(s.take_js_output(id).alerts, ["listFails: its own message"]);
+    assert_eq!(s.take_js_output(id).alerts, [crate::js::Message::plain("listFails: its own message")]);
 }
 
 /// A form whose only focus-driven script is a list box's validation still waits for the focus
@@ -5600,7 +5602,7 @@ fn a_list_box_with_only_a_validate_script_validates_as_the_focus_leaves() {
     s.apply(id, Edit::SetFieldValue { name: "list".into(), value: FieldValue::Choice(vec!["Apple".into()]) }).unwrap();
     assert!(s.take_js_output(id).alerts.is_empty(), "not as the item is picked");
     assert!(s.field_focus(id, "list", 0, Exit).is_ok());
-    assert_eq!(s.take_js_output(id).alerts, ["list: its own message"], "as the focus leaves");
+    assert_eq!(s.take_js_output(id).alerts, [crate::js::Message::plain("list: its own message")], "as the focus leaves");
 }
 
 /// Revert forgets where the focus was: a check box set after it, with nothing focused, runs its
@@ -5776,7 +5778,7 @@ fn focus_scripts_that_change_nothing_leave_the_document_clean() {
     let doc = s.get(id).unwrap();
     assert!(!doc.dirty && doc.can_undo().is_none(), "no edit kept");
     let out = s.take_js_output(id);
-    assert_eq!(out.alerts.iter().map(String::as_str).collect::<Vec<_>>(), ["left quiet"]);
+    assert_eq!(out.alerts.iter().map(|m| m.text.as_str()).collect::<Vec<_>>(), ["left quiet"]);
     // A field without focus scripts, and a field that doesn't exist.
     assert!(!s.field_focus(id, "exits", 0, Exit).unwrap());
     assert!(!s.field_focus(id, "nowhere", 0, Enter).unwrap());
@@ -6381,7 +6383,7 @@ fn xfa_check_box_and_radio_button_clicks_run_their_click_scripts() {
     s.apply(id, Edit::SetFieldValue { name: "agree".into(), value: FieldValue::Check(true) }).unwrap();
     assert_eq!(log(&s), "change 1;click 1;", "change, then click, each seeing the new value");
     let out = s.take_js_output(id);
-    assert_eq!(out.alerts, ["Agreed"]);
+    assert_eq!(out.alerts, [crate::js::Message::plain("Agreed")]);
     assert!(out.requests.iter().any(|r| matches!(r, pdfcraft_js::Request::Focus(n) if n == "note")), "a click may move the focus: {out:?}");
     s.apply(id, Edit::SetFieldValue { name: "agree".into(), value: FieldValue::Check(false) }).unwrap();
     assert_eq!(log(&s), "change 1;click 1;change 0;click 0;", "turning it off is a click too");
@@ -6680,6 +6682,8 @@ fn repeated_xfa_print_buttons_run_their_click_script() {
     }
 }
 
+/// An XFA form's scripts initialize, calculate, validate, show subforms and add and remove rows,
+/// with undo and save/reopen.
 #[test]
 fn xfa_scripts_initialize_calculate_validate_toggle_and_add_rows() {
     let bytes = Arc::new(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::scripted_template()));
@@ -6704,7 +6708,7 @@ fn xfa_scripts_initialize_calculate_validate_toggle_and_add_rows() {
     // A failing validate script shows its message; the value stays, as in Acrobat.
     s.apply(id, Edit::SetFieldValue { name: "qty".into(), value: FieldValue::Text("500".into()) }).unwrap();
     let out = s.take_js_output(id);
-    assert!(out.alerts.iter().any(|a| a == "Quantity must be 100 or less"), "{out:?}");
+    assert!(out.alerts.iter().any(|a| a.text == "Quantity must be 100 or less"), "{out:?}");
     assert_eq!(value(&s, "total"), vec!["2500".to_string()]);
     // A button adds a row: new fields, same page, one undo step.
     let before = names(&s).len();
@@ -6719,7 +6723,7 @@ fn xfa_scripts_initialize_calculate_validate_toggle_and_add_rows() {
     assert_eq!(value(&s, "grand"), vec!["42".to_string()], "{:?}", s.take_js_output(id));
     // Message boxes reach the viewer.
     let o = s.run_javascript(id, "", Some("hello")).unwrap();
-    assert_eq!(o.alerts, vec!["Hello 500".to_string()]);
+    assert_eq!(o.alerts, vec![crate::js::Message::plain("Hello 500")]);
     // The check box shows the hidden subform; undo hides it again.
     s.apply(id, Edit::SetFieldValue { name: "more".into(), value: FieldValue::Check(true) }).unwrap();
     assert!(names(&s).iter().any(|n| n == "note"), "{:?} {:?}", names(&s), s.take_js_output(id));
@@ -6734,7 +6738,7 @@ fn xfa_scripts_initialize_calculate_validate_toggle_and_add_rows() {
     // FormCalc scripts run too.
     let o = s.run_javascript(id, "", Some("legacy")).unwrap();
     assert_eq!(o.error, None);
-    assert_eq!(o.alerts, vec!["FormCalc".to_string()]);
+    assert_eq!(o.alerts, vec![crate::js::Message::plain("FormCalc")]);
     // Saved and reopened: the visible subform, the values and the rows are what they were.
     let saved = s.save_bytes(id).unwrap();
     let id2 = s.open("again.pdf", None, saved, None).unwrap();
@@ -6955,6 +6959,7 @@ fn an_xfa_form_converts_to_a_static_form_that_keeps_its_fields() {
     assert_eq!(value(&s, id, "total"), vec!["15".to_string()]);
 }
 
+/// A dynamic XFA form scripted in FormCalc runs as the JavaScript one does.
 #[test]
 fn dynamic_xfa_forms_run_formcalc_scripts() {
     let bytes = Arc::new(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::formcalc_template()));
@@ -6973,7 +6978,7 @@ fn dynamic_xfa_forms_run_formcalc_scripts() {
     assert_eq!(value(&s, "words"), vec!["Thirty-Five".to_string()]);
     s.apply(id, Edit::SetFieldValue { name: "qty".into(), value: FieldValue::Text("500".into()) }).unwrap();
     let out = s.take_js_output(id);
-    assert!(out.alerts.iter().any(|a| a == "Quantity must be 100 or less"), "{out:?}");
+    assert!(out.alerts.iter().any(|a| a.text == "Quantity must be 100 or less"), "{out:?}");
     assert_eq!(value(&s, "qty"), vec!["500".to_string()]);
     // Buttons: a row is added, summed and removed; the message box reaches the viewer.
     let before = names(&s).len();
@@ -6984,7 +6989,7 @@ fn dynamic_xfa_forms_run_formcalc_scripts() {
     s.apply(id, Edit::SetFieldValue { name: "amount_2".into(), value: FieldValue::Text("32".into()) }).unwrap();
     assert_eq!(value(&s, "grand"), vec!["42".to_string()], "{:?}", s.take_js_output(id));
     let o = s.run_javascript(id, "", Some("hello")).unwrap();
-    assert_eq!(o.alerts, vec!["Hello 500".to_string()]);
+    assert_eq!(o.alerts, vec![crate::js::Message::plain("Hello 500")]);
     s.apply(id, Edit::SetFieldValue { name: "more".into(), value: FieldValue::Check(true) }).unwrap();
     assert!(names(&s).iter().any(|n| n == "note"), "{:?} {:?}", names(&s), s.take_js_output(id));
     s.run_javascript(id, "", Some("removeRow")).unwrap();
@@ -7119,6 +7124,8 @@ fn datasets_streams(bytes: &Arc<Vec<u8>>) -> usize {
         .count()
 }
 
+/// Hostile scripts run on open are merged, capped, kept from printing, saving and opening links,
+/// and noted.
 #[test]
 fn hostile_xfa_open_scripts_are_merged_capped_kept_from_printing_and_noted() {
     // On open: a calculate setting its own value 50 000 times, an initialize script showing a
@@ -7148,6 +7155,36 @@ fn hostile_xfa_open_scripts_are_merged_capped_kept_from_printing_and_noted() {
     assert!(out.errors.iter().any(|e| e.contains("more than 100 messages")), "{:?}", out.errors);
     assert!(out.requests.is_empty(), "only a click may print, save or open links: {:?}", out.requests);
     assert!(out.console.iter().any(|c| c.contains("only print when a button is clicked")), "{:?}", out.console);
+}
+
+/// An XFA button's message boxes reach the viewer with their titles, icons and buttons, from
+/// JavaScript (`xfa.host.messageBox`, `app.alert` in its own order) and FormCalc alike, every
+/// one of them and in order.
+#[test]
+fn xfa_message_boxes_keep_their_title_icon_and_buttons() {
+    use crate::js::{Message, MessageButtons, MessageIcon};
+    let tpl = pdfcraft_xfa::fixtures::scripted_template()
+        .replace(
+            r#"xfa.host.messageBox("Hello " + qty.rawValue);"#,
+            r#"xfa.host.messageBox("Clear the rows?", "Order form", 2, 2); app.alert("Saved", 3, 0, "Order form");"#,
+        )
+        .replace(r#"$host.messageBox("FormCalc")"#, r#"$host.messageBox("Too many", "Limits", 1, 1)"#);
+    let bytes = Arc::new(pdfcraft_xfa::fixtures::shell(&tpl));
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let id = s.open("boxes.pdf", None, bytes, None).expect("opens");
+    let o = s.run_javascript(id, "", Some("hello")).unwrap();
+    assert_eq!(o.error, None);
+    let titled = |text: &str, title: &str, icon, buttons| Message { text: text.into(), title: Some(title.into()), icon, buttons };
+    assert_eq!(
+        o.alerts,
+        vec![
+            titled("Clear the rows?", "Order form", MessageIcon::Question, MessageButtons::YesNo),
+            titled("Saved", "Order form", MessageIcon::Status, MessageButtons::Ok),
+        ]
+    );
+    let o = s.run_javascript(id, "", Some("legacy")).unwrap();
+    assert_eq!(o.error, None);
+    assert_eq!(o.alerts, vec![titled("Too many", "Limits", MessageIcon::Warning, MessageButtons::OkCancel)]);
 }
 
 #[test]
