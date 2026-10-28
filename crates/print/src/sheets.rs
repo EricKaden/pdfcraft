@@ -17,10 +17,11 @@ pub fn cups_orientation(sheets: &[Sheet]) -> Option<(String, String)> {
 
 /// Add [`cups_orientation`] to a CUPS job's `options`, for the Print dialog's jobs and
 /// `doc_print`'s alike, unless they already name an orientation (a driver choice, or one a
-/// caller passed): `lp` must not be given the option twice. Nothing on Windows, whose print
-/// ticket sets each sheet's orientation itself.
+/// caller passed, in any case: CUPS reads option names without regard to case): `lp` must not be
+/// given the option twice. Nothing on Windows, whose print ticket sets each sheet's orientation
+/// itself.
 pub fn add_cups_orientation(options: &mut Vec<(String, String)>, sheets: &[Sheet]) {
-    if cfg!(windows) || options.iter().any(|(k, _)| k == "orientation-requested") {
+    if cfg!(windows) || options.iter().any(|(k, _)| k.eq_ignore_ascii_case("orientation-requested")) {
         return;
     }
     options.extend(cups_orientation(sheets));

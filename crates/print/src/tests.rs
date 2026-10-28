@@ -549,10 +549,13 @@ fn a_job_that_names_its_orientation_keeps_it() {
     // Added again, it isn't doubled.
     add_cups_orientation(&mut options, &landscape);
     assert_eq!(options, turned);
-    // A choice already made stands.
-    let mut chosen = vec![("orientation-requested".to_string(), "5".to_string())];
-    add_cups_orientation(&mut chosen, &landscape);
-    assert_eq!(chosen, [("orientation-requested".to_string(), "5".to_string())]);
+    // A choice already made stands, however its name is cased: CUPS reads option names without
+    // regard to case, so a second one would replace it.
+    for key in ["orientation-requested", "Orientation-Requested", "ORIENTATION-REQUESTED"] {
+        let mut chosen = vec![(key.to_string(), "5".to_string())];
+        add_cups_orientation(&mut chosen, &landscape);
+        assert_eq!(chosen, [(key.to_string(), "5".to_string())], "{key}");
+    }
 }
 
 #[cfg(all(unix, not(target_arch = "wasm32")))]
