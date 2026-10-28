@@ -2,7 +2,7 @@ use super::model::{
     MAX_ALERTS, MAX_CONSOLE, MAX_DEPTH, MAX_EFFECTS, MAX_NODES, MAX_PAYLOAD, MAX_READS, MAX_VALUE, XfaDoc, XfaEffect, XfaKind, XfaNode, clip,
     clip_value, effect_key, payload,
 };
-use super::{Context, HashMap, HashSet, JsResult, RefCell, error};
+use super::{Context, HashMap, HashSet, JsResult, Message, RefCell, error};
 
 /// One node of the flattened form, shared by the JavaScript and FormCalc engines.
 pub(crate) struct HNode {
@@ -169,7 +169,7 @@ impl XHost {
     /// `e` with its text cut to the lengths an effect keeps.
     fn clip_effect(&mut self, e: XfaEffect) -> XfaEffect {
         match e {
-            XfaEffect::MessageBox(m) => XfaEffect::MessageBox(clip(m)),
+            XfaEffect::MessageBox(m) => XfaEffect::MessageBox(Message { text: clip(m.text), title: m.title.map(clip), ..m }),
             XfaEffect::LaunchUrl(u) => XfaEffect::LaunchUrl(clip(u)),
             XfaEffect::SetFocus(s) => XfaEffect::SetFocus(clip(s)),
             XfaEffect::ResetData(names) => XfaEffect::ResetData(names.into_iter().map(clip).collect()),
