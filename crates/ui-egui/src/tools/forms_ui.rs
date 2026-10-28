@@ -14,6 +14,7 @@ use pdfcraft_engine::{Edit, FieldValue, FormField, FormFieldKind, FormWidget, fi
 use pdfcraft_render::DocInfo;
 
 use crate::canvas::{DocView, PageToolContext, PageXform, SignTab};
+use crate::page_cursor::Layer;
 use crate::theme::Tokens;
 
 const FOCUS_BLUE: Color32 = Color32::from_rgb(0x14, 0x73, 0xE6);
@@ -150,19 +151,6 @@ fn toggle_edit(f: &FormField, w: &FormWidget) -> Option<Edit> {
     Some(Edit::SetFieldValue { name: f.name.clone(), value })
 }
 
-/// Where the pointer is relative to one page's form widgets.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum FieldPointer {
-    /// Not over a field.
-    Away,
-    /// Over a field, which has set the cursor. Nothing is pressed, so the layers below still see
-    /// the hover, but they must not replace the cursor: a check box drawn with a glyph, or set
-    /// on printed text, is a button, not text to select.
-    Over,
-    /// The field owns the press or click.
-    Owned,
-}
-
 /// The first shown widget of `f` on `page` under the pointer at `p`, with its index.
 fn widget_at<'a>(xf: &PageXform, info: &DocInfo, page: usize, f: &'a FormField, p: egui::Pos2) -> Option<(&'a FormField, usize, &'a FormWidget)> {
     f.widgets
@@ -178,17 +166,17 @@ pub(crate) fn tab_under<'a>(tabs: &[(&'a str, SignTab)], p: egui::Pos2) -> Optio
     tabs.iter().rev().find(|(_, tab)| tab.rect.contains(p)).map(|(name, _)| *name)
 }
 
-/// Clicks on form widgets of one page. The pointer is on the first widget under it in the form's
-/// order, except on a sign tab (`tabs`, with the signature field each one signs), which is drawn
-/// over every field and so is on its own field.
-pub(crate) fn page_input(cx: PageToolContext<'_>, form: &[FormField], tabs: &[(&str, SignTab)], allowed: bool, view: &mut DocView) -> FieldPointer {
+/// Clicks on form widgets of one page. `true` when a field owns the press or click. The pointer is
+/// on the first widget under it in the form's order, except on a sign tab (`tabs`, with the
+/// signature field each one signs), which is drawn over every field and so is on its own field.
+pub(crate) fn page_input(cx: PageToolContext<'_>, form: &[FormField], tabs: &[(&str, SignTab)], allowed: bool, view: &mut DocView) -> bool {
     let PageToolContext { ui, resp, xf, ptr, page, info, .. } = cx;
-    let Some(p) = ptr.within(xf.rect) else { return FieldPointer::Away };
+    let Some(p) = ptr.within(xf.rect) else { return false };
     // A tab lies inside its field's widget, so that widget is under the pointer too.
     let on_tab = tab_under(tabs, p)
         .and_then(|name| form.iter().filter(|f| f.name == name && f.kind == FormFieldKind::Signature).find_map(|f| widget_at(xf, info, page, f, p)));
     let hit = on_tab.or_else(|| form.iter().find_map(|f| widget_at(xf, info, page, f, p)));
-    let Some((f, wi, w)) = hit else { return FieldPointer::Away };
+    let Some((f, wi, w)) = hit else { return false };
     // The field's tooltip (`/TU`), as Acrobat shows it on hover (#3854). ISO 32000-2 Table 226
     // makes it the name the user interface identifies the field by.
     if let Some(tip) = f.tooltip.as_deref().filter(|t| !t.trim().is_empty()) {
@@ -199,15 +187,16 @@ pub(crate) fn page_input(cx: PageToolContext<'_>, form: &[FormField], tabs: &[(&
     let pressable = f.kind == FormFieldKind::PushButton && !f.read_only() && f.button.is_some();
     // A radio button of a group can be read-only on its own.
     let usable = allowed && !w.read_only && (fillable(f) || pressable || f.kind == FormFieldKind::Signature);
-    // Only where the page shows: the mode bar and side panels over a field scrolled under them
-    // keep their own cursor (#2755).
-    if resp.contains_pointer() {
-        ui.ctx().set_cursor_icon(match (usable, f.kind) {
+    // Over the page's text too: a check box drawn with a glyph, or set on printed text, is a
+    // button, not text to select.
+    view.cursor.claim(
+        Layer::Field,
+        match (usable, f.kind) {
             (false, _) => egui::CursorIcon::NotAllowed,
             (true, FormFieldKind::Text) => egui::CursorIcon::Text,
             _ => egui::CursorIcon::PointingHand,
-        });
-    }
+        },
+    );
     // A text field opens on the press rather than the click, so a drag that starts on it
     // selects its text (#2213).
     let pressed = f.kind == FormFieldKind::Text && usable && resp.is_pointer_button_down_on() && ptr.pressed().is_some();
@@ -217,11 +206,11 @@ pub(crate) fn page_input(cx: PageToolContext<'_>, form: &[FormField], tabs: &[(&
         view.forms.pressed = true;
     }
     if !resp.clicked() {
-        return if resp.is_pointer_button_down_on() { FieldPointer::Owned } else { FieldPointer::Over };
+        return resp.is_pointer_button_down_on();
     }
     if !allowed {
         view.forms.notice = Some(FormNotice::Security);
-        return FieldPointer::Owned;
+        return true;
     }
     match f.kind {
         _ if f.read_only() || w.read_only => view.forms.notice = Some(FormNotice::ReadOnly(f.name.clone())),
@@ -292,7 +281,7 @@ pub(crate) fn page_input(cx: PageToolContext<'_>, form: &[FormField], tabs: &[(&
             }
         }
     }
-    FieldPointer::Owned
+    true
 }
 
 /// The edit the focused field's draft makes, if it differs from the field's value.
