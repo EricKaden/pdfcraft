@@ -1,4 +1,4 @@
-use super::*;
+use super::{Color32, HashSet, LayerOp, PdfCraftApp, Pos2, Rect, Tokens, Vec2, icons, pos2, theme, vec2};
 
 /// A validation badge drawn over a signature widget: the widget rectangle (user space), the verdict it shows, and its hover text.
 pub(crate) struct SignatureBadge {
