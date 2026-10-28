@@ -330,7 +330,7 @@ impl Automation {
                 "before_signing": before,
                 "after_signing": after,
                 "changed": changed,
-                "alerts": scripts.alerts,
+                "alerts": scripts.alerts.iter().map(crate::a11y::form_tools::alert_json).collect::<Vec<_>>(),
                 "errors": scripts.errors,
                 "unsaved_changes": self.doc(a)?.dirty,
             });

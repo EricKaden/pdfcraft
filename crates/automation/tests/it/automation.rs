@@ -5994,7 +5994,7 @@ fn signing_an_xfa_box_runs_its_signing_scripts_through_tools() {
     assert_eq!(changed.len(), 1, "only what preSign changed: {r}");
     assert_eq!((&changed[0]["after"], &changed[0]["read_only"]), (&json!(["signed"]), &json!(true)), "{r}");
     assert_eq!((scripts["before_signing"].as_bool(), scripts["after_signing"].as_bool()), (Some(true), Some(true)), "{r}");
-    assert_eq!(scripts["alerts"], json!(["Signing notice"]), "{r}");
+    assert_eq!(scripts["alerts"], json!([{ "message": "Signing notice", "title": null, "icon": "error", "buttons": "ok" }]), "{r}");
     assert_eq!(scripts["unsaved_changes"], json!(true), "the postSign change isn't in the signed file: {r}");
     // The signed file holds what the preSign script did, not what the postSign one did.
     let signed = ok(&mut a, "doc_open", json!({ "path": "signed.pdf" }))["doc"].as_u64().unwrap();
@@ -6623,6 +6623,8 @@ fn ocr_recognize_files_with_distinct_names_runs_as_before() {
     }
 }
 
+/// Field scripts set through the tools validate, calculate and format, and `js_run` reports console
+/// lines, every message with its details, and requests.
 #[test]
 fn javascript_through_tools() {
     let dir = workdir("js");
@@ -6656,10 +6658,17 @@ fn javascript_through_tools() {
     let r = ok(
         &mut a,
         "js_run",
-        json!({ "doc": doc, "script": "console.println(getField('Total').value); getField('Qty').value = 3; this.pageNum = 1; app.alert('ok');" }),
+        json!({ "doc": doc, "script": "console.println(getField('Total').value); getField('Qty').value = 3; this.pageNum = 1; app.alert('ok'); app.alert({ cMsg: 'Clear?', cTitle: 'Order', nIcon: 2, nType: 3 });" }),
     );
     assert_eq!(r["console"][0], "2500");
-    assert_eq!(r["alerts"][0], "ok");
+    // Every message, in order, with its title, icon and buttons.
+    assert_eq!(
+        r["alerts"],
+        json!([
+            { "message": "ok", "title": null, "icon": "error", "buttons": "ok" },
+            { "message": "Clear?", "title": "Order", "icon": "question", "buttons": "yes_no_cancel" },
+        ])
+    );
     assert_eq!(r["requests"][0]["page"], 2);
     let f = ok(&mut a, "form_fields", json!({ "doc": doc }));
     let total = f["fields"].as_array().unwrap().iter().find(|x| x["name"] == "Total").unwrap().clone();
@@ -7580,6 +7589,8 @@ fn repeated_xfa_print_buttons_work_through_tools_and_after_reopen() {
     check(&mut a, doc);
 }
 
+/// A dynamic XFA form's scripts run on open, on fills and for buttons through the tools, with undo,
+/// and `js_run` reports their messages.
 #[test]
 fn xfa_scripts_run_for_buttons_and_field_changes_through_tools() {
     let dir = workdir("xfa-scripts");
@@ -7608,7 +7619,7 @@ fn xfa_scripts_run_for_buttons_and_field_changes_through_tools() {
     ok(&mut a, "edit_undo", json!({ "doc": doc }));
     assert!(field(&mut a, "amount_2").is_none());
     let r = ok(&mut a, "js_run", json!({ "doc": doc, "script": "", "field": "hello" }));
-    assert_eq!(r["alerts"], json!(["Hello 4"]));
+    assert_eq!(r["alerts"], json!([{ "message": "Hello 4", "title": null, "icon": "error", "buttons": "ok" }]));
 }
 
 #[test]
@@ -7621,7 +7632,7 @@ fn active_xfa_skips_container_fallback_scripts_after_save_and_reopen() {
     ok(&mut a, "js_set_document_script", json!({"doc":doc,"name":"viewerFallback","script":fallback}));
     let out = ok(&mut a, "js_run", json!({"doc":doc,"script":"app.alert('Console message');"}));
     assert!(out["error"].is_null(), "{out}");
-    assert_eq!(out["alerts"], json!(["Console message"]));
+    assert_eq!(out["alerts"], json!([{ "message": "Console message", "title": null, "icon": "error", "buttons": "ok" }]));
     ok(&mut a, "doc_save", json!({"doc":doc,"path":"saved.pdf"}));
     ok(&mut a, "doc_close", json!({"doc":doc}));
     let doc = ok(&mut a, "doc_open", json!({"path":"saved.pdf"}))["doc"].as_u64().unwrap();
@@ -7631,7 +7642,7 @@ fn active_xfa_skips_container_fallback_scripts_after_save_and_reopen() {
     assert_eq!(out["alerts"], json!([]));
     let out = ok(&mut a, "js_run", json!({"doc":doc,"script":"","field":"hello"}));
     assert!(out["error"].is_null(), "{out}");
-    assert_eq!(out["alerts"], json!(["Hello 2"]));
+    assert_eq!(out["alerts"], json!([{ "message": "Hello 2", "title": null, "icon": "error", "buttons": "ok" }]));
     ok(&mut a, "xfa_to_static", json!({"doc":doc}));
     let out = ok(&mut a, "js_run", json!({"doc":doc,"script":""}));
     assert_eq!(out["alerts"].as_array().unwrap().len(), 1);
@@ -8055,7 +8066,7 @@ fn hebrew_text_through_tools_saves_reopens_extracts_and_renders() {
     let mut a = auto(&dir);
     let doc = ok(&mut a, "doc_open", json!({"path": "a.pdf"}))["doc"].as_u64().unwrap();
     let text = "שם משפחה: שרון, טל׳ 052-1234567 (נייד)";
-    let args = json!({"doc": doc, "page": 1, "text": text, "rect": [10, 20, 400, 40], "size": 11, "align": "right"});
+    let args = json!({"doc": doc, "page": 1, "text": text, "rect": [10, 20, 190, 40], "size": 7, "align": "right"});
     if pdfcraft_fonts::document_hebrew_font(false).is_none() {
         assert!(a.call("page_add_text", &args).unwrap_err().to_string().contains("U+05E9"));
         assert_eq!(ok(&mut a, "content_list", json!({"doc": doc}))["count"], 0);
