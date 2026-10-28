@@ -1,5 +1,5 @@
 use super::items::{Action, CornerShape, Cornered, Item, Pen};
-use super::*;
+use super::{Edge, HashMap, Layout, MAX_DEPTH, Node, Rect, Script, Stroke, date_letters, iso_to_pattern};
 
 pub(super) fn collect_values(nodes: &[Node], out: &mut HashMap<String, String>, depth: usize) {
     if depth > MAX_DEPTH {

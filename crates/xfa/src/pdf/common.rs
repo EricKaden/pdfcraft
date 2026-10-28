@@ -1,4 +1,4 @@
-use super::*;
+use super::{CornerShape, Cornered, Dict, Document, Family, Object, PdfString, Pen, Rect, Stream};
 
 /// Width and height of a JPEG from its first frame header (SOF0–SOF15, not the DNL/JPG/DAC/DHT
 /// markers). `None` for anything else.
