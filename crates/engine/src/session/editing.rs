@@ -1,4 +1,11 @@
-use super::*;
+#[cfg(test)]
+use super::check_refresh_panic;
+use super::{
+    Arc, DocId, Document, Edit, EditCtx, EditError, Label, MAX_UNDO, ObjectKind, OnceLock, RenderPool, SaveOptions, Scope, Session,
+    XFA_REMOVED_PREFIX, XFA_SCRIPTS_OFF, check_permission, comment_list, display_bytes, guard, info_fields, inspect, js, keys_after, note_warnings,
+    render_threads, run_edit, scan_colours, scope_of, shown_under_redactions, signatures_of, sync_xfa_state, undrawn_notices, uses_scripts,
+    write_incremental, xfa, xfa_sync_datasets,
+};
 
 impl Session {
     /// Apply an edit. On success the previous state is undoable and the view data is refreshed.
@@ -158,33 +165,7 @@ impl Session {
                     // Layout replaces pages and widgets, even if the page count is unchanged.
                     // Undo/redo must rebuild these too instead of refreshing only field values.
                     scope = Scope::Full;
-                    // A new layout: the form's layout:ready scripts run again, reading its page
-                    // count, as after a layout its scripts asked for. Not after a script of this
-                    // edit ran away: the form's scripts turn off once it is done.
-                    if !cx.xfa_ran_away
-                        && let Some(tpl) = cx.xfa.clone()
-                    {
-                        let highlight = cx.highlight();
-                        let page_count = pdfcraft_organize::page_count(&next).unwrap_or(cx.pages);
-                        let mut run = xfa::XfaRun {
-                            page_count,
-                            out: &mut cx.xfa_out,
-                            datasets: cx.xfa_datasets,
-                            ran_away: false,
-                            highlight,
-                            time_scale: cx.xfa_time_scale,
-                        };
-                        let ran = guard(|| xfa::on_layout(&mut next, &tpl, &mut run))
-                            .unwrap_or_else(|m| Err(format!("the form's scripts failed unexpectedly ({m})")));
-                        cx.xfa_datasets = run.datasets;
-                        cx.xfa_ran_away |= run.ran_away;
-                        cx.pages = run.page_count;
-                        let on = run.highlight;
-                        cx.set_highlight(on);
-                        if let Err(e) = ran {
-                            cx.xfa_out.errors.push(e);
-                        }
-                    }
+                    rerun_layout_ready(&mut next, &mut cx);
                 }
             }
         }
@@ -553,5 +534,28 @@ impl Session {
         doc.renderer = RenderPool::new(doc.display.clone(), render_threads(), doc.config.clone());
         doc.bytes = bytes;
         Ok(())
+    }
+}
+
+/// After a new layout: the form's `layout:ready` scripts run again, reading its page count, as
+/// after a layout its scripts asked for. Not after a script of this edit ran away: the form's
+/// scripts turn off once it is done.
+fn rerun_layout_ready(next: &mut pdfcraft_cos::Document, cx: &mut EditCtx) {
+    if cx.xfa_ran_away {
+        return;
+    }
+    let Some(tpl) = cx.xfa.clone() else { return };
+    let highlight = cx.highlight();
+    let page_count = pdfcraft_organize::page_count(next).unwrap_or(cx.pages);
+    let mut run =
+        xfa::XfaRun { page_count, out: &mut cx.xfa_out, datasets: cx.xfa_datasets, ran_away: false, highlight, time_scale: cx.xfa_time_scale };
+    let ran = guard(|| xfa::on_layout(next, &tpl, &mut run)).unwrap_or_else(|m| Err(format!("the form's scripts failed unexpectedly ({m})")));
+    cx.xfa_datasets = run.datasets;
+    cx.xfa_ran_away |= run.ran_away;
+    cx.pages = run.page_count;
+    let on = run.highlight;
+    cx.set_highlight(on);
+    if let Err(e) = ran {
+        cx.xfa_out.errors.push(e);
     }
 }
