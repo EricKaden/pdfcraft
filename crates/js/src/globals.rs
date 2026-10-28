@@ -2,7 +2,10 @@ use super::document::{field_object, get_field, get_nth_field_name, noop, num_fie
 use super::format::{printd, printf, printx, scand};
 use super::host::{arg, function, host, s, text, text_line};
 use super::model::{DISPLAY_HIDDEN, DISPLAY_NO_PRINT, DISPLAY_NO_VIEW, DISPLAY_VISIBLE, Event, Panel, Request};
-use super::{Attribute, Context, JsArray, JsObject, JsResult, JsString, JsValue, Message, MessageButtons, MessageIcon, NativeFunction, ObjectInitializer, error, js_string};
+use super::{
+    Attribute, Context, JsArray, JsObject, JsResult, JsString, JsValue, Message, MessageButtons, MessageIcon, NativeFunction, ObjectInitializer,
+    error, js_string,
+};
 
 // ── app, util, console ──────────────────────────────────────────────────────────────────────
 
@@ -100,13 +103,19 @@ fn launch_url(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsVa
 /// 1 and 2 open the file; 0 (the default) and any other value save it.
 pub(crate) fn data_object(args: &[JsValue], ctx: &mut Context) -> JsResult<(String, bool)> {
     let first = arg(args, 0);
-    let name = message(&first, "cName", ctx)?;
+    // Any object of named parameters is read by key, one without `cName` too, so a missing name
+    // is refused rather than read as the object's text.
+    let named = first.as_object().filter(|o| !o.is_array() && !o.is_callable());
+    let name = match &named {
+        Some(o) => text_line(&o.get(js_string!("cName"), ctx)?, ctx)?,
+        None => text_line(&first, ctx)?,
+    };
     if name.is_empty() {
         return Err(error("exportDataObject needs cName, the attached file's name"));
     }
-    let launch = match first.as_object() {
-        Some(o) if !o.is_array() && !o.is_callable() => o.get(js_string!("nLaunch"), ctx)?,
-        _ => arg(args, 3),
+    let launch = match &named {
+        Some(o) => o.get(js_string!("nLaunch"), ctx)?,
+        None => arg(args, 3),
     };
     let launch = if launch.is_undefined() || launch.is_null() { 0.0 } else { launch.to_number(ctx)? };
     Ok((name, launch == 1.0 || launch == 2.0))
