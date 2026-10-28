@@ -516,6 +516,78 @@ fn autotag_form_fields_writes_reviewable_widget_tags() {
     assert_eq!(result["status"], "passed");
 }
 
+/// A two-page PDF with headings set apart only by their style: chapters in Helvetica-Bold 18,
+/// a section in Helvetica-Bold 14, text in Helvetica 11 (#1693).
+fn styled_headings_pdf() -> Vec<u8> {
+    let page1 = "BT /FB 18 Tf 72 700 Td (Introduction) Tj ET BT /FR 11 Tf 72 670 Td (Some text) Tj ET \
+                 BT /FB 14 Tf 72 640 Td (Background) Tj ET";
+    let page2 = "BT /FB 18 Tf 72 700 Td (Results) Tj ET BT /FR 11 Tf 72 670 Td (More text) Tj ET";
+    let objs: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 /MediaBox [0 0 612 792] /Resources << /Font << /FB 7 0 R /FR 8 0 R >> >> >>".into(),
+        "<< /Type /Page /Parent 2 0 R /Contents 5 0 R >>".into(),
+        "<< /Type /Page /Parent 2 0 R /Contents 6 0 R >>".into(),
+        format!("<< /Length {} >>\nstream\n{page1}\nendstream", page1.len()),
+        format!("<< /Length {} >>\nstream\n{page2}\nendstream", page2.len()),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>".into(),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".into(),
+    ];
+    let mut bytes = b"%PDF-1.7\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, o) in objs.iter().enumerate() {
+        offsets.push(bytes.len());
+        bytes.extend_from_slice(format!("{} 0 obj\n{o}\nendobj\n", i + 1).as_bytes());
+    }
+    let xref = bytes.len();
+    bytes.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+    for o in offsets {
+        bytes.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    bytes.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
+    bytes
+}
+
+/// #1693: text_styles lists the styles, largest first; bookmark_from_text_styles makes the
+/// bookmarks from the ones given per level, returns the tree, undoes in one step and says why
+/// when it can't.
+#[test]
+fn bookmarks_from_text_styles_through_tools() {
+    let dir = workdir("text-style-bookmarks");
+    std::fs::write(dir.join("styled.pdf"), styled_headings_pdf()).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "styled.pdf" }))["doc"].as_u64().unwrap();
+    let styles = ok(&mut a, "text_styles", json!({ "doc": doc }))["styles"].clone();
+    assert_eq!(
+        styles,
+        json!([
+            { "font": "Helvetica-Bold", "size": 18.0, "bold": true, "italic": false, "lines": 2, "pages": 2, "sample": "Introduction" },
+            { "font": "Helvetica-Bold", "size": 14.0, "bold": true, "italic": false, "lines": 1, "pages": 1, "sample": "Background" },
+            { "font": "Helvetica", "size": 11.0, "bold": false, "italic": false, "lines": 2, "pages": 2, "sample": "Some text" },
+        ])
+    );
+    // The styles as text_styles gave them, the chapters first.
+    let levels = json!([styles[0].clone(), { "font": "Helvetica-Bold", "size": 14, "bold": true }]);
+    let r = ok(&mut a, "bookmark_from_text_styles", json!({ "doc": doc, "levels": levels }));
+    let top = &r["bookmarks"][0];
+    assert_eq!(top["title"], "Untitled");
+    let titles: Vec<(&str, u64)> =
+        top["children"].as_array().unwrap().iter().map(|c| (c["title"].as_str().unwrap(), c["page"].as_u64().unwrap())).collect();
+    assert_eq!(titles, [("Introduction", 1), ("Results", 2)]);
+    assert_eq!(top["children"][0]["children"][0]["title"], "Background");
+    assert_eq!(ok(&mut a, "edit_undo", json!({ "doc": doc }))["undone"], "New bookmarks from text styles");
+    // What can't be done says why.
+    let call = |a: &mut pdfcraft_automation::Automation, levels: Value| a.call("bookmark_from_text_styles", &json!({ "doc": doc, "levels": levels }));
+    assert!(matches!(call(&mut a, json!([])), Err(ToolError::InvalidArgs(_))));
+    assert!(matches!(call(&mut a, json!([{ "font": "Helvetica-Bold" }])), Err(ToolError::InvalidArgs(m)) if m.contains("size")));
+    assert!(
+        matches!(call(&mut a, json!([{ "font": "Helvetica-Bold", "size": 18, "bold": "yes" }])), Err(ToolError::InvalidArgs(m)) if m.contains("bold"))
+    );
+    let unused = call(&mut a, json!([{ "font": "Times-Roman", "size": 30 }]));
+    assert!(matches!(&unused, Err(ToolError::Failed(m)) if m.contains("no text is set in the chosen styles")), "{unused:?}");
+    let too_many: Vec<Value> = (0..10).map(|_| styles[0].clone()).collect();
+    assert!(matches!(call(&mut a, json!(too_many)), Err(ToolError::InvalidArgs(_))));
+}
+
 /// A one-page PDF whose form holds one text field named `name`.
 fn form_pdf(name: &str) -> Vec<u8> {
     let objs: Vec<String> = vec![
@@ -4941,6 +5013,23 @@ fn the_calculation_order_is_read_fixed_and_set() {
 }
 
 #[test]
+fn page_tab_orders_are_read_and_set_per_page_through_tools() {
+    let dir = workdir("pagetabs");
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    let r = ok(&mut a, "form_tab_order", json!({ "doc": doc }));
+    assert_eq!(r["page_tabs"], json!(["annotations", "annotations", "annotations"]));
+    assert!(r["undo"].is_null(), "reading changes nothing: {r}");
+    let r = ok(&mut a, "form_tab_order", json!({ "doc": doc, "order": "column", "pages": [1, 3] }));
+    assert_eq!(r["page_tabs"], json!(["column", "annotations", "column"]));
+    assert_eq!((r["undo"].as_str(), r["dirty"].as_bool()), (Some("Set tab order"), Some(true)));
+    let r = ok(&mut a, "form_tab_order", json!({ "doc": doc, "order": "structure", "pages": [2] }));
+    assert_eq!(r["page_tabs"], json!(["column", "structure", "column"]));
+    let r = ok(&mut a, "form_tab_order", json!({ "doc": doc, "order": "unspecified", "pages": [1] }));
+    assert_eq!(r["page_tabs"], json!(["annotations", "structure", "column"]));
+}
+
+#[test]
 fn tab_order_and_field_appearance_through_tools() {
     let dir = workdir("taborder");
     let mut a = auto(&dir);
@@ -7527,7 +7616,11 @@ fn xfa_focus_scripts_run_through_form_focus() {
     // what was undone can still be redone), and the message comes back.
     ok(&mut a, "doc_save", json!({ "doc": doc, "path": "saved.pdf" }));
     let quiet = ok(&mut a, "form_focus", json!({ "doc": doc, "field": "quiet", "event": "exit" }));
-    assert_eq!((quiet["changed"].clone(), quiet["alerts"].clone()), (json!(false), json!([{ "message": "left quiet", "title": null, "icon": "error", "buttons": "ok" }])), "{quiet}");
+    assert_eq!(
+        (quiet["changed"].clone(), quiet["alerts"].clone()),
+        (json!(false), json!([{ "message": "left quiet", "title": null, "icon": "error", "buttons": "ok" }])),
+        "{quiet}"
+    );
     let state = &ok(&mut a, "doc_info", json!({ "doc": doc }))["document"];
     assert_eq!((state["dirty"].clone(), state["redo"].clone()), (json!(false), json!("Run form script")), "{state}");
     // The second radio button has an enter script of its own.
@@ -9376,4 +9469,25 @@ fn page_render_draws_stamps_without_an_appearance() {
     let custom = ink(170, 290);
     let grey = custom.iter().filter(|p| p[0].abs_diff(p[1]) < 24 && p[1].abs_diff(p[2]) < 24).count();
     assert!(grey > 100 && grey == custom.len(), "an unknown name is a grey placeholder: {grey} of {}", custom.len());
+}
+
+#[test]
+fn deleting_one_radio_button_through_tools_keeps_the_group() {
+    let dir = workdir("delete-radio");
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    for (x, export) in [(20, "S"), (40, "M"), (60, "L")] {
+        let args = json!({ "doc": doc, "page": 1, "type": "radio", "rect": [x, 100, x + 14, 114], "group": "size", "export": export });
+        ok(&mut a, "form_add_field", args);
+    }
+    ok(&mut a, "form_fill", json!({ "doc": doc, "values": { "size": "L" } }));
+    ok(&mut a, "form_delete_field", json!({ "doc": doc, "field": "size", "widget": 2 }));
+    let size = |a: &mut Automation| ok(a, "form_fields", json!({ "doc": doc }))["fields"][0].clone();
+    assert_eq!((size(&mut a)["options"].clone(), size(&mut a)["value"].clone()), (json!(["S", "L"]), json!("L")), "only M is gone");
+    for widget in [0, 3, -1] {
+        let r = a.call("form_delete_field", &json!({ "doc": doc, "field": "size", "widget": widget }));
+        assert!(matches!(r, Err(ToolError::InvalidArgs(_))), "widget {widget}: {r:?}");
+    }
+    ok(&mut a, "edit_undo", json!({ "doc": doc }));
+    assert_eq!(size(&mut a)["options"], json!(["S", "M", "L"]), "one undo step brings it back");
 }
