@@ -345,7 +345,8 @@ fn rendering_into_the_pdf_replaces_the_placeholder_page_and_adds_fields() {
 /// Required field, which viewers outline when they highlight a form's fields: a radio group on the
 /// group field, its buttons' flags being the group's (a button of its own that must be chosen
 /// makes the group required too). `nullTest="warning"` only recommends a value,
-/// so it, like no test, leaves the field optional.
+/// so it, like no test, leaves the field optional. A push button keeps no value (ISO 32000-2
+/// §12.7.5.2.2), so it is never required.
 #[test]
 fn fields_that_must_be_filled_in_are_required() {
     let xdp = r##"<?xml version="1.0" encoding="UTF-8"?>
@@ -355,6 +356,7 @@ fn fields_that_must_be_filled_in_are_required() {
 <field name="should" w="2in" h="0.3in"><ui><textEdit/></ui><validate nullTest="warning"/></field>
 <field name="may" w="2in" h="0.3in"><ui><textEdit/></ui></field>
 <field name="agree" w="2in" h="0.3in"><ui><checkButton/></ui><items><integer>1</integer><integer>0</integer></items><validate nullTest="error"/></field>
+<field name="go" w="1in" h="0.3in"><ui><button/></ui><caption><value><text>Go</text></value></caption><validate nullTest="error"/></field>
 <exclGroup name="answer" layout="lr-tb"><validate nullTest="error"/>
  <field name="yes" w="1in" h="0.3in"><ui><checkButton shape="round"/></ui><items><text>Y</text></items></field>
  <field name="no" w="1in" h="0.3in"><ui><checkButton shape="round"/></ui><items><text>N</text></items></field>
@@ -385,6 +387,7 @@ fn fields_that_must_be_filled_in_are_required() {
     assert_eq!(leaf("should"), Some(false), "a warning only recommends a value");
     assert_eq!(leaf("may"), Some(false));
     assert_eq!(leaf("agree"), Some(true), "a check box too");
+    assert_eq!(leaf("go"), Some(false), "a push button holds no value to fill in");
     assert_eq!(leaf("answer"), Some(true), "the radio group field");
     assert_eq!(leaf("optional"), Some(false));
     assert_eq!(leaf("second"), Some(true), "a later button that must be chosen makes its group required");

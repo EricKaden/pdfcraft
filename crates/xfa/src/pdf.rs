@@ -174,8 +174,9 @@ impl Emitter<'_> {
             ff |= 1;
         }
         // Required, which viewers outline when they highlight a form's fields. A radio button's
-        // flags are its group's: the group takes it below.
-        if w.required && !matches!(w.kind, WidgetKind::Radio { .. }) {
+        // flags are its group's: the group takes it below. A push button keeps no value (ISO
+        // 32000-2 §12.7.5.2.2), so there is nothing it could be required to hold.
+        if w.required && !matches!(w.kind, WidgetKind::Radio { .. } | WidgetKind::Button { .. }) {
             ff |= 1 << 1;
         }
         let mut top_level = true;
