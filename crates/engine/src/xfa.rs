@@ -415,6 +415,7 @@ impl<'a, 'b> Runner<'a, 'b> {
         }
     }
 
+    /// Keep console `lines`, up to [`MAX_CONSOLE_PER_EVENT`] for one event; the rest are counted.
     fn console(&mut self, lines: impl IntoIterator<Item = String>) {
         for l in lines {
             if self.run.out.console.len() < MAX_CONSOLE_PER_EVENT {
@@ -431,7 +432,7 @@ impl<'a, 'b> Runner<'a, 'b> {
     fn validate(&mut self, ev: &ScriptEvent, name: &str, value: &str) -> Result<(), String> {
         let Some(o) = self.run(ev, value)? else { return Ok(()) };
         if (o.result_bool == Some(false) || o.error.is_some()) && !value.trim().is_empty() {
-            self.alert(ev.message.clone().unwrap_or_else(|| format!("{name}: the value is not valid")));
+            self.alert(crate::js::Message::plain(ev.message.clone().unwrap_or_else(|| format!("{name}: the value is not valid"))));
         }
         Ok(())
     }
@@ -448,7 +449,8 @@ impl<'a, 'b> Runner<'a, 'b> {
         Ok(())
     }
 
-    fn alert(&mut self, m: String) {
+    /// Show message `m`, up to [`MAX_ALERTS_PER_EVENT`] for one event; the rest are counted.
+    fn alert(&mut self, m: crate::js::Message) {
         if self.run.out.alerts.len() < MAX_ALERTS_PER_EVENT {
             self.run.out.alerts.push(m);
         } else {
