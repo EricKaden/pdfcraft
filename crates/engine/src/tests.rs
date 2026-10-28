@@ -8842,3 +8842,27 @@ fn a_saved_form_too_deep_to_read_through_is_left_as_saved() {
     assert_eq!(xfa(5), Some(pdfcraft_render::Xfa::Dynamic), "nested, unsigned: laid out");
     assert_eq!(xfa(40), Some(pdfcraft_render::Xfa::Static), "too deep to tell: left as saved");
 }
+
+/// The renderer's inspection and the xfa crate each decide whether a form saved with its pages
+/// is laid out again from its template, each walking the field tree for a signature in its own
+/// way (the renderer reads the file through lopdf, the xfa crate through cos). They agree on every
+/// such form: required or not, signed or not, and a signature box nested from shallow to past
+/// the depth either looks through.
+#[test]
+fn the_renderer_and_the_xfa_crate_agree_on_which_saved_forms_are_laid_out() {
+    let mut forms: Vec<(String, Vec<u8>)> = Vec::new();
+    for render in ["required", "forbidden", ""] {
+        for signed in [false, true] {
+            forms.push((format!("{render:?}, signed {signed}"), pdfcraft_xfa::fixtures::saved_with_pages_shell(render, signed)));
+        }
+    }
+    for depth in [1, 5, 30, 31, 32, 33, 34, 40] {
+        forms.push((format!("nested {depth} deep"), pdfcraft_xfa::fixtures::deep_saved_with_pages_shell(depth)));
+    }
+    for (what, bytes) in forms {
+        let bytes = Arc::new(bytes);
+        let info = pdfcraft_render::inspect(bytes.clone(), None).expect("inspects");
+        let cos = pdfcraft_cos::Document::open(bytes).expect("opens");
+        assert_eq!(info.xfa == Some(pdfcraft_render::Xfa::Dynamic), pdfcraft_xfa::is_dynamic(&cos), "{what}");
+    }
+}
