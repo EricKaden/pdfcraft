@@ -78,7 +78,9 @@ impl Automation {
                     json!({ "trigger": trigger.id(), "action": kind, "performed": true, "alerts": o.alerts.iter().map(alert_json).collect::<Vec<_>>(), "console": o.console, "requests": reqs, "error": o.error }),
                 )
             }
-            B::Alert(m) => Ok(json!({ "trigger": trigger.id(), "action": kind, "performed": true, "alerts": [alert_json(&pdfcraft_engine::js::Message::plain(m))] })),
+            B::Alert(m) => Ok(
+                json!({ "trigger": trigger.id(), "action": kind, "performed": true, "alerts": [alert_json(&pdfcraft_engine::js::Message::plain(m))] }),
+            ),
             _ => Ok(json!({ "trigger": trigger.id(), "action": kind, "performed": false })),
         }
     }
@@ -134,7 +136,9 @@ impl Automation {
         let changed = self.session.field_focus(id, name, widget, focus).map_err(failed)?;
         let out = self.session.take_js_output(id);
         let reqs: Vec<Value> = out.requests.iter().map(request_json).collect();
-        Ok(json!({ "changed": changed, "alerts": out.alerts.iter().map(alert_json).collect::<Vec<_>>(), "console": out.console, "requests": reqs, "errors": out.errors }))
+        Ok(
+            json!({ "changed": changed, "alerts": out.alerts.iter().map(alert_json).collect::<Vec<_>>(), "console": out.console, "requests": reqs, "errors": out.errors }),
+        )
     }
 
     /// `form_merge_data`: merge the form data files at `paths` into one CSV at `path`, a row per
