@@ -20,6 +20,7 @@ mod script;
 #[cfg(test)]
 use calc::{Notation, eval_notation, notation_name, notation_tokens, unique};
 pub use calc::{calculate, calculation_reads, notation_js, rename_in_calculation};
+use format::parse_date_split;
 pub use format::{DATE_PRESETS, DateTime, TIME_PRESETS, format_date, format_value, js_number, keystroke, make_number, parse_date, validate};
 use script::{Arg, call};
 pub use script::{calculate_js, format_js, parse_calculate, parse_format, parse_validate, validate_js};
@@ -125,6 +126,10 @@ pub struct Scripts {
     pub calculate: Option<String>,
 }
 
+/// The century split of a two-digit year in an XFA picture clause (XFA 3.3, Picture Clause
+/// Reference): `00` to `29` are 2000 to 2029 and `30` to `99` are 1930 to 1999.
+const XFA_CENTURY_SPLIT: i32 = 30;
+
 impl Actions {
     /// Whether the field has no format, validation or calculation PdfCraft recognises.
     pub fn is_empty(&self) -> bool {
@@ -142,14 +147,14 @@ impl Actions {
     }
 
     /// What the Format event shows for `value` ([`format_value`]). An XFA date field shows a date
-    /// only for a value that is one, in its edit pattern (written in the display pattern) or as an
-    /// ISO date (`2026-10-18` or `20261018`); anything else, which its format would read loosely,
-    /// shows as typed.
+    /// only for a value that is one, in its edit pattern (written in the display pattern, a
+    /// two-digit year read as XFA reads it, [`XFA_CENTURY_SPLIT`]) or as an ISO date (`2026-10-18`
+    /// or `20261018`); anything else, which its format would read loosely, shows as typed.
     pub fn format_value(&self, value: &str) -> String {
         match (&self.format, self.edit_pattern()) {
             (Format::Date(fmt), Some(edit)) => {
                 let t = value.trim();
-                match parse_date(t, edit).filter(|dt| format_date(*dt, edit).eq_ignore_ascii_case(t)) {
+                match parse_date_split(t, edit, XFA_CENTURY_SPLIT).filter(|dt| format_date(*dt, edit).eq_ignore_ascii_case(t)) {
                     // Typed as it shows: kept as it is, its case too.
                     Some(_) if edit == fmt => value.to_string(),
                     Some(dt) => format_date(dt, fmt),

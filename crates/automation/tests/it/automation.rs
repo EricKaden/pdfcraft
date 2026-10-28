@@ -7191,6 +7191,34 @@ fn xfa_date_fields_read_typed_dates_through_their_edit_picture() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// An XFA date field with a two-digit year in its edit picture shows the year through its display
+/// picture with the century split XFA picture clauses use, 30: `00` to `29` are 2000 to 2029,
+/// `30` to `99` are 1930 to 1999, for a date from the data and for one typed alike.
+#[test]
+fn xfa_date_fields_show_two_digit_years_with_the_century_split_of_30() {
+    let xdp = r##"<?xml version="1.0" encoding="UTF-8"?>
+<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/">
+<template xmlns="http://www.xfa.org/schema/xfa-template/3.3/">
+<subform name="form" layout="tb" locale="en_US">
+ <pageSet><pageArea name="front"><contentArea x="0.5in" y="0.5in" w="7.5in" h="10in"/><medium short="8.5in" long="11in"/></pageArea></pageSet>
+ <field name="born" w="2in" h="0.3in"><ui><dateTimeEdit/><picture>date{DDMMMYY}</picture></ui><value><date/></value><format><picture>date{MM/DD/YYYY}</picture></format></field>
+</subform>
+</template>
+<xfa:datasets xmlns:xfa="http://www.xfa.org/schema/xfa-data/1.0/"><xfa:data><form><born>1945-10-18</born></form></xfa:data></xfa:datasets>
+</xdp:xdp>
+"##;
+    let dir = workdir("xfa-century-split");
+    std::fs::write(dir.join("born.pdf"), pdfcraft_xfa::fixtures::shell(xdp)).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "born.pdf" }))["doc"].as_u64().unwrap();
+    assert_eq!(page_text(&mut a, doc).join("\n"), "10/18/1945", "from the data");
+    for (typed, shown) in [("18OCT29", "10/18/2029"), ("18OCT30", "10/18/1930"), ("18OCT49", "10/18/1949"), ("18OCT50", "10/18/1950")] {
+        ok(&mut a, "form_fill", json!({ "doc": doc, "values": { "born": typed } }));
+        assert_eq!(page_text(&mut a, doc).join("\n"), shown, "{typed}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A dynamic XFA form opens laid out from its template through the tools, renders, takes values
 /// and saves them.
 #[test]
