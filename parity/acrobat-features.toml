@@ -1202,8 +1202,8 @@ milestone = "M3"
 status = "shipped"
 commands = []
 tools = []
-evidence = ["crates/ui-egui/tests/it/comments.rs::hovering_a_comment_shows_its_author_and_text", "crates/ui-egui/tests/it/comments.rs::multiline_markup_hover_stays_on_marked_lines", "crates/ui-egui/tests/it/comments.rs::neighboring_markup_hover_changes_to_its_own_comment", "crates/ui-egui/tests/it/comments.rs::overlapping_markup_hover_shows_the_topmost_comment", "crates/ui-egui/tests/it/comments.rs::overlapping_markup_hover_uses_annotation_index_with_different_top_edges", "crates/ui-egui/tests/it/comments.rs::markup_hover_without_quads_keeps_the_rectangle_fallback", "crates/ui-egui/tests/it/comments.rs::markup_hover_skips_popup_containers", "crates/ui-egui/tests/it/comments.rs::preference_hides_author_only_highlight_hover_previews"]
-notes = "A popup with the author and comment text. Text markup uses selection's per-quad screen bounds, including page and view rotation, so unmarked parts of a multiline Rect do not claim the hover (#3541). The last-painted eligible comment wins where annotations overlap (#3620), using the original /Annots index independently of spatial inspection order. Missing complete quads retain the Rect fallback; author-only highlight hiding and dialog suppression remain. Bounds are rectangular, not exact hit testing of skewed quadrilaterals. Pointer feedback is UI-only, reachable through the opt-in control channel, with no document automation tool."
+evidence = ["crates/ui-egui/tests/it/comments.rs::hovering_a_comment_shows_its_author_and_text", "crates/ui-egui/tests/it/pointer.rs::a_comments_tip_shows_with_every_tool_beside_its_cursor", "crates/ui-egui/tests/it/comments.rs::multiline_markup_hover_stays_on_marked_lines", "crates/ui-egui/tests/it/comments.rs::neighboring_markup_hover_changes_to_its_own_comment", "crates/ui-egui/tests/it/comments.rs::overlapping_markup_hover_shows_the_topmost_comment", "crates/ui-egui/tests/it/comments.rs::overlapping_markup_hover_uses_annotation_index_with_different_top_edges", "crates/ui-egui/tests/it/comments.rs::markup_hover_without_quads_keeps_the_rectangle_fallback", "crates/ui-egui/tests/it/comments.rs::markup_hover_skips_popup_containers", "crates/ui-egui/tests/it/comments.rs::preference_hides_author_only_highlight_hover_previews"]
+notes = "A popup with the author and comment text, as Acrobat shows it: with every tool, beside that tool's own cursor (Acrobat does the same with Select, Hand, Add comment, Highlight, Rectangle and Stamp); not with Fill & Sign, while drawing freehand (#429) or while a comment is moved, resized or drawn. Text markup uses selection's per-quad screen bounds, including page and view rotation, so unmarked parts of a multiline Rect do not claim the hover (#3541). The last-painted eligible comment wins where annotations overlap (#3620), using the original /Annots index independently of spatial inspection order. Missing complete quads retain the Rect fallback; author-only highlight hiding and dialog suppression remain. Bounds are rectangular, not exact hit testing of skewed quadrilaterals. Still missing: Acrobat's hover outline on a highlight with every tool, and its hit on an unfilled shape's border only. Pointer feedback is UI-only, reachable through the opt-in control channel, with no document automation tool."
 
 [[feature]]
 id = "view.page-size-hover"
@@ -2656,7 +2656,7 @@ status = "shipped"
 commands = ["page.organize"]
 tools = []
 evidence = ["crates/ui-egui/tests/it/editing.rs::shift_click_selects_a_range_and_moves_it", "crates/ui-egui/tests/it/editing.rs::organize_tool_opens_the_overview_directly_and_can_be_reentered", "crates/ui-egui/tests/it/editing.rs::organize_opens_on_the_current_page", "crates/ui-egui/tests/it/control.rs::organize_overview_is_reachable_through_the_control_channel", "crates/ui-egui/tests/it/editing.rs::organize_panel_comes_with_the_grid_and_closes_it", "crates/ui-egui/tests/it/editing.rs::leaving_organize_goes_back_to_the_workspace_panel"]
-notes = "Opening the Organize pages tool enters the overview directly, on the current page: selected and scrolled into view (#1910). Hovered, focused and selected pages expose individual rotate/delete actions; the toolbar acts on the selection. The left panel is laid out as Acrobat's Organize pages panel: Pages selected (typed ranges, or All, Even, Odd, Landscape or Portrait pages; empty, it shows the current page), rotate, delete, extract, Insert (a blank page, pages from a file, duplicates), Replace, Split, Bates numbering, Set page boxes, Crop pages, Print pages and Page labels. Closing it, by its Close, the grid's Close or opening a page, returns to the workspace's own panel (Edit, Convert, E-Sign or All tools). Page transitions, Page templates and Page properties are listed but planned."
+notes = "Opening the Organize pages tool enters the overview directly, on the current page: selected and scrolled into view (#1910). Hovered, focused and selected pages expose individual rotate/delete actions; the toolbar acts on the selection. The left panel is laid out as Acrobat's Organize pages panel: Pages selected (typed ranges, or All, Even, Odd, Landscape or Portrait pages; empty, it shows the current page), rotate, delete, extract, Insert (a blank page, pages from a file, duplicates), Replace, Split, Bates numbering, Set page boxes, Crop pages, Print pages, Page labels and Page properties (the selected pages' tab order). Closing it, by its Close, the grid's Close or opening a page, returns to the workspace's own panel (Edit, Convert, E-Sign or All tools). Page transitions and Page templates are listed but planned."
 
 [[feature]]
 id = "organize.multi-select-pages"
@@ -3240,11 +3240,11 @@ title = "Page tab order property"
 area = "D"
 tier = "P1"
 milestone = "M6"
-status = "planned"
-commands = []
-tools = []
-evidence = []
-notes = ""
+status = "shipped"
+commands = ["page.properties"]
+tools = ["form_tab_order"]
+evidence = ["crates/ui-egui/tests/it/editing.rs::page_properties_sets_the_tab_order_of_the_selected_pages", "crates/forms/src/tests.rs::tab_orders_are_read_for_each_page", "crates/forms/src/tests.rs::rows_and_columns_tab_right_to_left_in_a_document_bound_on_the_right", "crates/forms/src/tests.rs::an_indirect_tabs_value_orders_the_page", "crates/automation/tests/it/automation.rs::page_tab_orders_are_read_and_set_per_page_through_tools"]
+notes = "Organize pages ▸ Page properties ▸ Tab Order sets the selected pages' order: Use Row Order, Use Column Order, Use Document Structure or Unspecified, as one undo step. It opens on the pages' order, or with no choice when they differ. Rows and columns run right to left in a document bound on the right. form_tab_order reads each page's order (page_tabs) and sets it for chosen pages. Acrobat's Page Properties also has an Actions tab (organize.page-actions), still planned."
 
 [[feature]]
 id = "organize.page-actions"
@@ -3377,6 +3377,18 @@ commands = ["bookmark.from_structure"]
 tools = ["bookmark_from_structure"]
 evidence = ["crates/a11y/src/tests.rs::headings_are_found_with_their_levels_titles_and_pages", "crates/a11y/src/tests.rs::headings_drawn_glyph_by_glyph_keep_their_words", "crates/a11y/src/tests.rs::horizontally_scaled_wrapped_heading_keeps_a_space_between_lines", "crates/organize/src/tests.rs::a_bookmark_tree_nests_entries_by_level_under_a_new_first_bookmark", "crates/engine/src/tests.rs::bookmarks_from_structure_nest_the_headings_and_undo", "crates/automation/tests/it/automation.rs::bookmarks_from_structure_through_tools", "crates/ui-egui/tests/it/bookmarks.rs::new_bookmarks_from_structure_nest_the_tagged_headings"]
 notes = "Bookmark options ▸ New bookmarks from structure: tagged headings (H1–H6 through the role map; a plain H takes its Sect/Part/Art nesting) become bookmarks nested by level under a new first \"Untitled\" bookmark, each linked to its element (/SE). Titles come from /ActualText, the marked text drawn directly on the page (not inside Form XObjects; words split where the glyphs are apart, so text placed glyph by glyph, as Chromium writes it, keeps its words; vertical line breaks use the absolute font size independently of Tz), /Alt or /T. Not yet: Acrobat's choice of element types (only headings), and destinations go to the heading's page rather than its position on it"
+
+[[feature]]
+id = "organize.bookmarks-from-text-styles"
+title = "Generate bookmarks from text styles"
+area = "D"
+tier = "P2"
+milestone = "M4"
+status = "shipped"
+commands = ["bookmark.from_text_styles"]
+tools = ["text_styles", "bookmark_from_text_styles"]
+evidence = ["crates/engine/src/tests.rs::bookmarks_from_text_styles_nest_the_headings_and_undo", "crates/engine/src/text_style_bookmarks.rs::subset_tags_are_left_out_of_the_font_name", "crates/engine/src/text_style_bookmarks.rs::styles_match_within_a_quarter_point", "crates/automation/tests/it/automation.rs::bookmarks_from_text_styles_through_tools", "crates/ui-egui/tests/it/bookmarks.rs::new_bookmarks_from_text_styles_from_the_bookmark_options"]
+notes = "Bookmark options (and Pages) ▸ New bookmarks from text styles…, for documents whose headings aren't tagged (#1693): the dialog lists the document's text styles (font without its subset tag, the size shown at, bold, italic, line count and a sample), the largest first and offered for level 1; one style per level, up to four levels (nine headlessly). Every line in a level's style becomes a bookmark of that level under a new first \"Untitled\" bookmark, a heading set on several rows is one bookmark, and each goes to the top of its heading (/XYZ). Lines are read down each page, then left to right, so a multi-column page's headings are taken row by row across the columns; sizes within a quarter point match. Not yet: several styles for one level, colour as part of a style, and the first 5000 pages only. Acrobat has no such command (its bookmarks come from structure); this is beyond it"
 
 [[feature]]
 id = "organize.attachments-add"
@@ -4252,11 +4264,11 @@ title = "Import comments from another PDF"
 area = "E"
 tier = "P2"
 milestone = "M5"
-status = "planned"
-commands = []
-tools = []
-evidence = []
-notes = ""
+status = "shipped"
+commands = ["comment.import"]
+tools = ["doc_import_data"]
+evidence = ["crates/organize/src/comments.rs::comments_of_another_pdf_land_on_the_pages_with_the_same_numbers", "crates/organize/src/comments.rs::a_reply_on_an_earlier_page_reaches_its_comment_by_name", "crates/organize/src/comments.rs::a_comment_keeps_its_layer_and_the_layer_its_visibility", "crates/organize/src/comments.rs::a_long_thread_goes_with_its_first_comment_and_a_loop_of_replies_stays", "crates/organize/src/comments.rs::a_pdf_without_comments_copies_none", "crates/engine/src/tests.rs::importing_a_pdf_copies_its_comments", "crates/ui-egui/tests/it/pickers.rs::import_comments_takes_the_comments_of_another_pdf"]
+notes = "Import comments accepts a PDF beside XFDF and FDF. Each comment goes onto the page with the same number, at the same place, with its appearance, pop-up and replies; comments on pages past the document's last page are left out. A same-named comment is replaced, as with XFDF and FDF. Not yet: redaction marks are not copied, and a PDF that needs a password is refused."
 
 [[feature]]
 id = "comment.summarize"
@@ -4811,8 +4823,8 @@ milestone = "M6"
 status = "shipped"
 commands = ["form.prepare"]
 tools = ["form_add_field", "form_set_props", "form_delete_field"]
-evidence = ["crates/ui-egui/tests/it/prepare.rs::placing_moving_editing_and_deleting_a_field", "crates/ui-egui/tests/it/prepare.rs::arrow_keys_nudge_the_selected_field_instead_of_turning_the_page", "crates/ui-egui/src/tools/prepare.rs::corner_drags_stretch_freely_and_keep_proportions_with_shift", "crates/ui-egui/tests/it/prepare.rs::deleting_several_selected_fields_and_detecting_fields_from_the_panel", "crates/engine/src/tests.rs::preparing_a_form_adds_renames_and_deletes_fields", "crates/ui-egui/tests/it/bulk_fields.rs::shared_properties_preserve_mixed_values_and_undo_the_whole_change", "crates/ui-egui/tests/it/bulk_fields.rs::select_all_in_prepare_a_form_selects_only_the_current_pages_fields", "crates/ui-egui/tests/it/bulk_fields.rs::dragging_an_empty_page_area_selects_fields_without_moving_them"]
-notes = "fields shown with blue fill and name tags; select, move (drag, or the arrow keys: a point, Shift ten points, #2608), resize by corners (Shift keeps the field's proportions, #2199), Delete (every selected field, one undo step); field tools return to Select after one field. Shared General, Appearance and applicable Options edits are atomic and opt-in; Ctrl/Command+A selects the current page, rectangle and panel selection are supported. Names, positions, choices/defaults and script tabs remain individual GUI edits"
+evidence = ["crates/ui-egui/tests/it/prepare.rs::placing_moving_editing_and_deleting_a_field", "crates/ui-egui/tests/it/prepare.rs::deleting_one_radio_button_keeps_the_rest_of_its_group", "crates/ui-egui/tests/it/prepare.rs::deleting_two_radio_buttons_of_a_group_at_once", "crates/forms/src/tests.rs::deleting_one_radio_button_keeps_the_group_and_its_other_buttons", "crates/forms/src/tests.rs::deleting_the_chosen_radio_button_turns_the_group_off", "crates/forms/src/tests.rs::deleting_one_copy_of_a_field_keeps_the_field_and_its_value", "crates/automation/tests/it/automation.rs::deleting_one_radio_button_through_tools_keeps_the_group", "crates/ui-egui/tests/it/prepare.rs::arrow_keys_nudge_the_selected_field_instead_of_turning_the_page", "crates/ui-egui/src/tools/prepare.rs::corner_drags_stretch_freely_and_keep_proportions_with_shift", "crates/ui-egui/tests/it/prepare.rs::deleting_several_selected_fields_and_detecting_fields_from_the_panel", "crates/engine/src/tests.rs::preparing_a_form_adds_renames_and_deletes_fields", "crates/ui-egui/tests/it/bulk_fields.rs::shared_properties_preserve_mixed_values_and_undo_the_whole_change", "crates/ui-egui/tests/it/bulk_fields.rs::select_all_in_prepare_a_form_selects_only_the_current_pages_fields", "crates/ui-egui/tests/it/bulk_fields.rs::dragging_an_empty_page_area_selects_fields_without_moving_them"]
+notes = "fields shown with blue fill and name tags; select, move (drag, or the arrow keys: a point, Shift ten points, #2608), resize by corners (Shift keeps the field's proportions, #2199), Delete (every selected field, one undo step; a selected radio button or copy of a duplicated field goes on its own and the rest of its group stays, a field's last widget takes the field, #4609); field tools return to Select after one field. Shared General, Appearance and applicable Options edits are atomic and opt-in; Ctrl/Command+A selects the current page, rectangle and panel selection are supported. Names, positions, choices/defaults and script tabs remain individual GUI edits"
 
 [[feature]]
 id = "form.add-text-field"
