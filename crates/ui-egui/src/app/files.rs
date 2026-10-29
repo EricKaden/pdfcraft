@@ -257,6 +257,12 @@ impl PdfCraftApp {
     ) -> Result<DocId, String> {
         let id = self.session.commit_open(prepared);
         self.password_prompt = None;
+        // A tab opening in front leaves a portfolio's tab, whose file list gives the panel back:
+        // the document a portfolio presents opens with the panels any other would.
+        if activate {
+            self.leave_portfolio();
+        }
+        let right_before = self.right;
         // The reading-colours preference is app-wide: a newly opened document starts with it.
         // Idempotent: the engine returns `false` when the document has the setting already.
         self.session.set_reading_colors(id, self.reading_colors);
@@ -267,6 +273,13 @@ impl PdfCraftApp {
         // the user closed stays closed (#1590).
         let opening_mode = self.mode_override.unwrap_or(self.default_mode);
         let initial = doc.initial_view();
+        // A portfolio presents the document its `/D` names (ISO 32000-2 Table 153), when that is a PDF.
+        let portfolio_initial = doc
+            .info
+            .portfolio
+            .as_ref()
+            .and_then(|p| p.initial)
+            .filter(|&i| doc.info.attachments.get(i).is_some_and(|a| a.name.to_lowercase().ends_with(".pdf")));
         if activate && self.right.is_none() && !self.right_panel_closed && opening_mode != Mode::Read {
             self.right = if !doc.info.annotations.is_empty() {
                 Some(RightPanel::Comments)
@@ -296,6 +309,16 @@ impl PdfCraftApp {
         // its own (the prompt is `dialogs::full_screen_prompt`).
         if activate && initial.full_screen {
             self.pending_full_screen = Some(id);
+        }
+        if activate {
+            // A portfolio's tab shows its files from the start, in place of the panel there was
+            // before it opened, whichever panel its page mode asked for.
+            if opening_mode != Mode::Read && self.lists_files(id) {
+                self.show_portfolio_files(id, right_before);
+            }
+            if let Some(index) = portfolio_initial {
+                self.portfolio_initial = Some((id, index));
+            }
         }
         if activate
             && self.left_open
@@ -395,6 +418,59 @@ impl PdfCraftApp {
                 #[cfg(target_arch = "wasm32")]
                 self.notify_fmt("Downloading attachments on the web arrives with M3.10 ({n} bytes ready)", &[("n", &bytes.len().to_string())]);
             }
+        }
+    }
+
+    /// A PDF portfolio (ISO 32000-2 §7.11.6) shows its documents, not the cover sheet that its
+    /// pages are. The document a portfolio that just opened presents first (`/D`) opens in a
+    /// tab of its own, and a portfolio's tab shows its file list, the Attachments panel, even
+    /// with the right panel closed, unless the portfolio keeps the list hidden (`/View /H`).
+    /// Leaving the tab gives back the panel the list replaced, unless the reader changed panels
+    /// meanwhile. Called every frame.
+    pub(crate) fn present_portfolios(&mut self) {
+        if let Some((doc, index)) = self.portfolio_initial.take() {
+            self.attachment_action(doc, index, true);
+            // A portfolio inside the portfolio waits until the reader opens it, so a nested
+            // file can't open tab after tab on its own.
+            self.portfolio_initial = None;
+        }
+        let active = self.active_ids().map(|(_, id)| id);
+        if active == self.portfolio_seen {
+            return;
+        }
+        self.leave_portfolio();
+        if let Some(id) = active
+            && self.mode != Mode::Read
+            && self.right != Some(RightPanel::Attachments)
+            && self.lists_files(id)
+        {
+            self.show_portfolio_files(id, self.right);
+        }
+        self.portfolio_seen = active;
+    }
+
+    /// The document is a portfolio whose tab shows its file list: one that doesn't keep the
+    /// list hidden (`/View /H`).
+    fn lists_files(&self, id: DocId) -> bool {
+        self.session.get(id).and_then(|d| d.info.portfolio.as_ref()).is_some_and(|p| p.view != pdfcraft_render::PortfolioView::Hidden)
+    }
+
+    /// Show portfolio `id`'s file list in place of `before`, the panel given back when its tab
+    /// is left.
+    fn show_portfolio_files(&mut self, id: DocId, before: Option<RightPanel>) {
+        self.portfolio_seen = Some(id);
+        self.portfolio_panel = Some(before);
+        self.right = Some(RightPanel::Attachments);
+    }
+
+    /// Leave a portfolio's tab: the panel its file list replaced comes back, unless the reader
+    /// changed panels meanwhile.
+    fn leave_portfolio(&mut self) {
+        self.portfolio_seen = None;
+        if let Some(before) = self.portfolio_panel.take()
+            && self.right == Some(RightPanel::Attachments)
+        {
+            self.right = before;
         }
     }
 
