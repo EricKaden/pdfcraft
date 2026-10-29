@@ -201,6 +201,44 @@ fn save_with_marks_holds_for_each_document_until_it_changes() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A redaction mark added while the Save As picker is open (on Windows the window still takes
+/// input then) is asked about before anything is written to the place chosen there: Save with
+/// marks writes it there with the marks, without asking again or opening another picker; Redact
+/// all and save applies them and writes it there; Cancel writes nothing.
+#[test]
+fn a_mark_added_while_the_save_as_picker_is_open_is_asked_about_first() {
+    let dir = std::env::temp_dir().join(format!("pdfcraft-redact-picker-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let elsewhere = dir.join("elsewhere.pdf");
+    let marks_in = |path: &std::path::Path| {
+        let mut s = pdfcraft_engine::Session::new();
+        let id = s.open("saved.pdf", None, std::sync::Arc::new(std::fs::read(path).unwrap()), None).unwrap();
+        s.get(id).unwrap().redaction_marks()
+    };
+    for (answer, out, marks) in
+        [("Save with marks", "kept.pdf", Some(1)), ("Redact all and save", "applied.pdf", Some(0)), ("Cancel", "cancelled.pdf", None)]
+    {
+        let out = dir.join(out);
+        let mut h = harness();
+        h.state_mut().pick_override = Some(vec![out.to_string_lossy().into_owned()]);
+        h.state_mut().execute("file.save_as");
+        // The picker has answered, but no frame has taken the answer yet: the mark comes first.
+        let mark = h.state().redact_prefs.mark(0, vec![pdfcraft_engine::rect_quad([10.0, 10.0, 50.0, 30.0])], "T");
+        assert!(h.state_mut().apply_edit(mark));
+        // A second picker would write here instead.
+        h.state_mut().pick_override = Some(vec![elsewhere.to_string_lossy().into_owned()]);
+        h.run_steps(3);
+        assert_eq!(h.state().dialog, Some(Dialog::RedactBeforeSave), "{answer}: asked first");
+        assert!(!out.exists(), "{answer}: nothing is written before the answer");
+        h.get_by_label(answer).click();
+        h.run_steps(4);
+        assert_eq!(h.state().dialog, None, "{answer}: asked once");
+        assert!(!elsewhere.exists(), "{answer}: no second picker");
+        assert_eq!(out.exists().then(|| marks_in(&out)), marks, "{answer}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// Redaction codes picked in Redaction Tool Properties become the marks' overlay text, in the
 /// code set's order; turning codes off gives back the custom text, which was kept meanwhile.
 #[test]
