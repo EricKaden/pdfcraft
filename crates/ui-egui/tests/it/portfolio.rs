@@ -183,6 +183,43 @@ fn a_password_asked_for_a_file_opened_with_the_portfolio_stays_asked() {
     }
 }
 
+/// An attachment deleted while the initial document waits (here for a password asked for a file
+/// opened with the portfolio) doesn't change which document opens.
+#[test]
+fn a_deleted_attachment_doesnt_change_which_document_opens() {
+    let pdf = portfolio("/Collection << /D (form.pdf) >>", &[("intro.pdf", PAGE), ("form.pdf", PAGE)]);
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("portfolio.pdf", None, pdf.clone()).unwrap();
+        app.open_bytes("locked.pdf", None, locked()).unwrap();
+        app
+    });
+    h.run_steps(4);
+    assert!(h.state_mut().apply_edit(pdfcraft_engine::Edit::DeleteAttachment { key: "intro.pdf".into() }));
+    h.state_mut().submit_password(None);
+    h.run_steps(4);
+    assert_eq!(tabs(&h), (vec!["portfolio.pdf".into(), "form.pdf".into()], Some("form.pdf".into())));
+}
+
+/// Leaving the portfolio's tab in Read mode: Read mode gives back the panel the file list
+/// replaced, not the list, on the tab that is active when it ends.
+#[test]
+fn read_mode_gives_back_the_panel_the_file_list_replaced() {
+    let mut h = opened(portfolio("/Collection << /View /D >>", &[("form.pdf", PAGE)]), true);
+    h.state_mut().open_bytes("other.pdf", None, PAGE.to_vec()).unwrap();
+    h.run_steps(2);
+    select(&mut h, 0);
+    assert_eq!(h.state().right, Some(RightPanel::Attachments));
+    assert!(h.state_mut().execute("view.read_mode"));
+    h.run_steps(2);
+    assert_eq!(h.state().right, None);
+    select(&mut h, 1);
+    assert!(h.state_mut().execute("view.read_mode"));
+    h.run_steps(2);
+    assert_eq!(h.state().right, None, "the panel was closed before the list showed");
+}
+
 /// `/View /H` presents the initial document but leaves the file list to the reader.
 #[test]
 fn a_portfolio_that_keeps_its_list_hidden_still_presents_its_initial_document() {

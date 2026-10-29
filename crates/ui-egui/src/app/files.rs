@@ -6,6 +6,11 @@ pub(crate) fn same_file(a: &str, b: &str) -> bool {
     a == b || matches!((std::path::absolute(a), std::path::absolute(b)), (Ok(x), Ok(y)) if x == y)
 }
 
+/// An attachment opens as a PDF in a tab of its own, as the Attachments panel's Open does.
+fn opens_as_pdf(a: &pdfcraft_render::Attachment) -> bool {
+    a.name.to_lowercase().ends_with(".pdf")
+}
+
 impl PdfCraftApp {
     /// Open a document the way it asks to be opened: navigation panel, layout, magnification,
     /// page and the place on it (Document Properties ▸ Initial View, `/OpenAction`). With Always
@@ -275,13 +280,15 @@ impl PdfCraftApp {
         // the user closed stays closed (#1590).
         let opening_mode = self.mode_override.unwrap_or(self.default_mode);
         let initial = doc.initial_view();
-        // A portfolio presents the document its `/D` names (ISO 32000-2 Table 153), when that is a PDF.
-        let portfolio_initial = doc
-            .info
-            .portfolio
-            .as_ref()
-            .and_then(|p| p.initial)
-            .filter(|&i| doc.info.attachments.get(i).is_some_and(|a| a.name.to_lowercase().ends_with(".pdf")));
+        // A portfolio presents the document its `/D` names (ISO 32000-2 Table 153), when that is a
+        // PDF: kept by its name-tree key, which an edit meanwhile can't shift as it can an index.
+        let portfolio_initial =
+            doc.info.portfolio.as_ref().and_then(|p| p.initial).and_then(|i| doc.info.attachments.get(i)).filter(|a| opens_as_pdf(a)).and_then(|a| {
+                match &a.source {
+                    pdfcraft_render::AttachmentSource::Document { key } => Some(key.clone()),
+                    pdfcraft_render::AttachmentSource::Annotation { .. } => None,
+                }
+            });
         if activate && self.right.is_none() && !self.right_panel_closed && opening_mode != Mode::Read {
             self.right = if !doc.info.annotations.is_empty() {
                 Some(RightPanel::Comments)
@@ -320,7 +327,7 @@ impl PdfCraftApp {
             }
             // A document opening in front of a portfolio that hasn't presented its initial
             // document yet (files opened together) keeps the front.
-            self.portfolio_initial = portfolio_initial.map(|index| (id, index));
+            self.portfolio_initial = portfolio_initial.map(|key| (id, key));
         }
         if activate
             && self.left_open
@@ -440,8 +447,9 @@ impl PdfCraftApp {
         #[cfg(target_arch = "wasm32")]
         let busy = self.modal_open() || self.web_reads.load(std::sync::atomic::Ordering::Relaxed) > 0;
         if !busy
-            && let Some((doc, index)) = self.portfolio_initial.take()
+            && let Some((doc, key)) = self.portfolio_initial.take()
             && self.active_ids().is_some_and(|(_, id)| id == doc)
+            && let Some(index) = self.portfolio_attachment(doc, &key)
         {
             self.attachment_action(doc, index, true);
             // A portfolio inside the portfolio waits until the reader opens it, so a nested
@@ -477,14 +485,27 @@ impl PdfCraftApp {
         self.right = Some(RightPanel::Attachments);
     }
 
+    /// Where in `doc`'s attachments now the PDF its name tree keys `key` is: an attachment
+    /// deleted since the portfolio opened moves it, or it is gone.
+    fn portfolio_attachment(&self, doc: DocId, key: &str) -> Option<usize> {
+        self.session
+            .get(doc)?
+            .info
+            .attachments
+            .iter()
+            .position(|a| opens_as_pdf(a) && matches!(&a.source, pdfcraft_render::AttachmentSource::Document { key: k } if k == key))
+    }
+
     /// Leave a portfolio's tab: the panel its file list replaced comes back, unless the reader
-    /// changed panels meanwhile.
+    /// changed panels meanwhile. In Read mode, which put the list away and gives it back on
+    /// leaving, it is that panel Read mode gives back instead.
     fn leave_portfolio(&mut self) {
         self.portfolio_seen = None;
-        if let Some(before) = self.portfolio_panel.take()
-            && self.right == Some(RightPanel::Attachments)
-        {
+        let Some(before) = self.portfolio_panel.take() else { return };
+        if self.right == Some(RightPanel::Attachments) {
             self.right = before;
+        } else if self.mode == Mode::Read && self.right_before_read == Some(RightPanel::Attachments) {
+            self.right_before_read = before;
         }
     }
 

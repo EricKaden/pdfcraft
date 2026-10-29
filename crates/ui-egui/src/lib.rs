@@ -268,10 +268,10 @@ pub struct PdfCraftApp {
     /// The user closed the right panel, so opening a document leaves it closed instead of
     /// showing its comments or bookmarks (#1590). Remembered across restarts.
     pub right_panel_closed: bool,
-    /// A portfolio that just opened and the attachment it presents first (`/Collection /D`),
-    /// opened by [`Self::present_portfolios`] on the next frame while the portfolio is still the
-    /// active tab.
-    portfolio_initial: Option<(DocId, usize)>,
+    /// A portfolio that just opened and the name-tree key of the attachment it presents first
+    /// (`/Collection /D`), opened by [`Self::present_portfolios`] on the next frame while the
+    /// portfolio is still the active tab.
+    portfolio_initial: Option<(DocId, String)>,
     /// The document whose tab [`Self::present_portfolios`] last saw active.
     portfolio_seen: Option<DocId>,
     /// Browser file reads still under way (drops, the web file picker): each file opens in front
