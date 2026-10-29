@@ -4,6 +4,7 @@
 use pdfcraft_automation::{Automation, Content};
 use serde_json::{Value, json};
 
+/// Call tool `name` and return its JSON result.
 fn tool(a: &mut Automation, name: &str, args: Value) -> Value {
     match a.call(name, &args).unwrap().remove(0) {
         Content::Json(value) => value,
@@ -34,6 +35,7 @@ trailer << /Root 1 0 R >>
     .into_bytes()
 }
 
+/// `doc_info` names a portfolio's initial document and view, and reports none for a plain file.
 #[test]
 fn doc_info_names_the_document_a_portfolio_presents_first() {
     let dir = tempfile::tempdir().unwrap();

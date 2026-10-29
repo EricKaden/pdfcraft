@@ -26,10 +26,13 @@ trailer << /Root 1 0 R >>
     .into_bytes()
 }
 
+/// The portfolio [`portfolio`] with `collection` reads as.
 fn read(collection: Option<&str>) -> Option<Portfolio> {
     inspect(Arc::new(portfolio(collection)), None).expect("opens").portfolio
 }
 
+/// `/D` picks the attachment presented first, matched as the keys decode, and `/View` how the
+/// list first shows.
 #[test]
 fn a_portfolio_presents_the_attachment_its_d_names() {
     // `/D` names `b.pdf` in the keys' own UTF-16, then as a literal string: both decode as the

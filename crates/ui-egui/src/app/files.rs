@@ -247,6 +247,8 @@ impl PdfCraftApp {
         self.finish_open(name, path, bytes.len(), prepared, activate).map(|_| ())
     }
 
+    /// Admit a prepared document: its tab, the panels and view it opens with, a portfolio's file
+    /// list and initial document, the recent-files entry and what its scripts said on opening.
     fn finish_open(
         &mut self,
         name: &str,
@@ -316,9 +318,9 @@ impl PdfCraftApp {
             if opening_mode != Mode::Read && self.lists_files(id) {
                 self.show_portfolio_files(id, right_before);
             }
-            if let Some(index) = portfolio_initial {
-                self.portfolio_initial = Some((id, index));
-            }
+            // A document opening in front of a portfolio that hasn't presented its initial
+            // document yet (files opened together) keeps the front.
+            self.portfolio_initial = portfolio_initial.map(|index| (id, index));
         }
         if activate
             && self.left_open
@@ -428,7 +430,9 @@ impl PdfCraftApp {
     /// Leaving the tab gives back the panel the list replaced, unless the reader changed panels
     /// meanwhile. Called every frame.
     pub(crate) fn present_portfolios(&mut self) {
-        if let Some((doc, index)) = self.portfolio_initial.take() {
+        if let Some((doc, index)) = self.portfolio_initial.take()
+            && self.active_ids().is_some_and(|(_, id)| id == doc)
+        {
             self.attachment_action(doc, index, true);
             // A portfolio inside the portfolio waits until the reader opens it, so a nested
             // file can't open tab after tab on its own.

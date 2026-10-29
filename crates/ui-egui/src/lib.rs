@@ -269,7 +269,8 @@ pub struct PdfCraftApp {
     /// showing its comments or bookmarks (#1590). Remembered across restarts.
     pub right_panel_closed: bool,
     /// A portfolio that just opened and the attachment it presents first (`/Collection /D`),
-    /// opened by [`Self::present_portfolios`] on the next frame.
+    /// opened by [`Self::present_portfolios`] on the next frame while the portfolio is still the
+    /// active tab.
     portfolio_initial: Option<(DocId, usize)>,
     /// The document whose tab [`Self::present_portfolios`] last saw active.
     portfolio_seen: Option<DocId>,

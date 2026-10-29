@@ -78,6 +78,8 @@ fn select(h: &mut Harness<'static, PdfCraftApp>, index: usize) {
     h.run_steps(2);
 }
 
+/// The initial document opens in front, and the portfolio's tab lists its files whatever the
+/// reader's panel preference, giving the panel back when left.
 #[test]
 fn a_portfolio_opens_its_initial_document_and_shows_its_files_with_the_panel_closed() {
     let mut h = opened(portfolio("/Collection << /D (form.pdf) /View /T >>", &[("intro.pdf", PAGE), ("form.pdf", PAGE)]), true);
@@ -106,6 +108,7 @@ fn a_portfolio_opens_its_initial_document_and_shows_its_files_with_the_panel_clo
     assert_eq!(h.state().right, Some(RightPanel::Bookmarks));
 }
 
+/// The initial document opens on its own panels, not on the portfolio's file list.
 #[test]
 fn the_initial_document_opens_without_the_portfolios_file_list() {
     // The portfolio asks for the Attachments panel too (`/PageMode /UseAttachments`), and the
@@ -118,6 +121,28 @@ fn the_initial_document_opens_without_the_portfolios_file_list() {
     assert_eq!(h.state().right, Some(RightPanel::Attachments));
 }
 
+/// A file opened together with a portfolio, after it, stays in front.
+#[test]
+fn a_file_opened_after_the_portfolio_keeps_the_front() {
+    // Two files opened at once, the portfolio first: the second stays in front, and the
+    // portfolio's initial document waits for the reader, whose list shows on the portfolio's tab.
+    let pdf = portfolio("/Collection << /D (form.pdf) >>", &[("form.pdf", PAGE)]);
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.right_panel_closed = true;
+        app.open_bytes("portfolio.pdf", None, pdf.clone()).unwrap();
+        app.open_bytes("other.pdf", None, PAGE.to_vec()).unwrap();
+        app
+    });
+    h.run_steps(4);
+    assert_eq!(tabs(&h), (vec!["portfolio.pdf".into(), "other.pdf".into()], Some("other.pdf".into())));
+    assert_eq!(h.state().right, None);
+    select(&mut h, 0);
+    assert_eq!(h.state().right, Some(RightPanel::Attachments));
+}
+
+/// `/View /H` presents the initial document but leaves the file list to the reader.
 #[test]
 fn a_portfolio_that_keeps_its_list_hidden_still_presents_its_initial_document() {
     let mut h = opened(portfolio("/Collection << /D (form.pdf) /View /H >>", &[("intro.pdf", PAGE), ("form.pdf", PAGE)]), true);
@@ -126,6 +151,7 @@ fn a_portfolio_that_keeps_its_list_hidden_still_presents_its_initial_document() 
     assert_eq!(h.state().right, None, "/View /H: the list shows when the reader asks for it");
 }
 
+/// Without a PDF to present, the portfolio stays in front with its files listed.
 #[test]
 fn a_portfolio_without_an_initial_document_shows_its_files_over_the_cover() {
     // Without `/D` the cover is the initial document; a `/D` naming a file that isn't a PDF
@@ -137,6 +163,7 @@ fn a_portfolio_without_an_initial_document_shows_its_files_over_the_cover() {
     }
 }
 
+/// A portfolio nested in the initial document doesn't open a chain of tabs.
 #[test]
 fn a_portfolio_inside_the_initial_document_waits_for_the_reader() {
     // The initial document is itself a portfolio presenting a third file: opening the outer

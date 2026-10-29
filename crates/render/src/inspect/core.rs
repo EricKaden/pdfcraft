@@ -161,6 +161,8 @@ impl<'a> Inspector<'a> {
         me
     }
 
+    /// Read the document's catalog and pages into `info`: metadata, outline, fields, layers,
+    /// fonts, attachments, a portfolio and where it opens.
     pub(super) fn fill(&self, info: &mut DocInfo) {
         // lopdf drops /Encrypt from the trailer once it has decrypted the file.
         info.encrypted = self.doc.encrypted();
@@ -289,6 +291,7 @@ impl<'a> Inspector<'a> {
         Portfolio { initial, view }
     }
 
+    /// The object a reference points at, or `o` itself for a direct object or a broken reference.
     pub(super) fn resolve(&self, o: &'a Object) -> &'a Object {
         self.doc.dereference(o).map(|(_, o)| o).unwrap_or(o)
     }
