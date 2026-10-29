@@ -6,11 +6,6 @@ pub(crate) fn same_file(a: &str, b: &str) -> bool {
     a == b || matches!((std::path::absolute(a), std::path::absolute(b)), (Ok(x), Ok(y)) if x == y)
 }
 
-/// An attachment opens as a PDF in a tab of its own, as the Attachments panel's Open does.
-fn opens_as_pdf(a: &pdfcraft_render::Attachment) -> bool {
-    a.name.to_lowercase().ends_with(".pdf")
-}
-
 impl PdfCraftApp {
     /// Open a document the way it asks to be opened: navigation panel, layout, magnification,
     /// page and the place on it (Document Properties ▸ Initial View, `/OpenAction`). With Always
@@ -280,14 +275,12 @@ impl PdfCraftApp {
         // the user closed stays closed (#1590).
         let opening_mode = self.mode_override.unwrap_or(self.default_mode);
         let initial = doc.initial_view();
-        // A portfolio presents the document its `/D` names (ISO 32000-2 Table 153), when that is a
-        // PDF: kept by its name-tree key, which an edit meanwhile can't shift as it can an index.
+        // A portfolio presents the document its `/D` names (ISO 32000-2 Table 153), kept by its
+        // name-tree key, which an edit meanwhile can't shift as it can an index.
         let portfolio_initial =
-            doc.info.portfolio.as_ref().and_then(|p| p.initial).and_then(|i| doc.info.attachments.get(i)).filter(|a| opens_as_pdf(a)).and_then(|a| {
-                match &a.source {
-                    pdfcraft_render::AttachmentSource::Document { key } => Some(key.clone()),
-                    pdfcraft_render::AttachmentSource::Annotation { .. } => None,
-                }
+            doc.info.portfolio.as_ref().and_then(|p| p.initial).and_then(|i| doc.info.attachments.get(i)).and_then(|a| match &a.source {
+                pdfcraft_render::AttachmentSource::Document { key } => Some(key.clone()),
+                pdfcraft_render::AttachmentSource::Annotation { .. } => None,
             });
         if activate && self.right.is_none() && !self.right_panel_closed && opening_mode != Mode::Read {
             self.right = if !doc.info.annotations.is_empty() {
@@ -451,7 +444,7 @@ impl PdfCraftApp {
             && self.active_ids().is_some_and(|(_, id)| id == doc)
             && let Some(index) = self.portfolio_attachment(doc, &key)
         {
-            self.attachment_action(doc, index, true);
+            self.open_portfolio_initial(doc, index);
             // A portfolio inside the portfolio waits until the reader opens it, so a nested
             // file can't open tab after tab on its own.
             self.portfolio_initial = None;
@@ -485,7 +478,7 @@ impl PdfCraftApp {
         self.right = Some(RightPanel::Attachments);
     }
 
-    /// Where in `doc`'s attachments now the PDF its name tree keys `key` is: an attachment
+    /// Where in `doc`'s attachments now the file its name tree keys `key` is: an attachment
     /// deleted since the portfolio opened moves it, or it is gone.
     fn portfolio_attachment(&self, doc: DocId, key: &str) -> Option<usize> {
         self.session
@@ -493,19 +486,36 @@ impl PdfCraftApp {
             .info
             .attachments
             .iter()
-            .position(|a| opens_as_pdf(a) && matches!(&a.source, pdfcraft_render::AttachmentSource::Document { key: k } if k == key))
+            .position(|a| matches!(&a.source, pdfcraft_render::AttachmentSource::Document { key: k } if k == key))
+    }
+
+    /// Open portfolio `doc`'s attachment `index` in a tab of its own when its bytes are a PDF,
+    /// whatever its name. A file of another kind, or one that can't be read, stays in the list.
+    fn open_portfolio_initial(&mut self, doc: DocId, index: usize) {
+        let Some(d) = self.session.get(doc) else { return };
+        let Some(att) = d.info.attachments.get(index).cloned() else { return };
+        let Ok(bytes) = pdfcraft_render::attachment_data(&d.bytes, d.password.as_deref(), &att) else { return };
+        if pdfcraft_engine::source_kind(&att.name, &bytes) != Some(pdfcraft_engine::SourceKind::Pdf) {
+            return;
+        }
+        if let Err(e) = self.open_bytes(&crate::files::attachment_file_name(&att.name), None, bytes) {
+            self.notify_fmt("Couldn't open {name}: {e}", &[("name", &att.name), ("e", &e.to_string())]);
+        }
     }
 
     /// Leave a portfolio's tab: the panel its file list replaced comes back, unless the reader
     /// changed panels meanwhile. In Read mode, which put the list away and gives it back on
-    /// leaving, it is that panel Read mode gives back instead.
+    /// leaving, it is the panel Read mode gives back that changes, and a panel the reader picked
+    /// in Read mode stays.
     fn leave_portfolio(&mut self) {
         self.portfolio_seen = None;
         let Some(before) = self.portfolio_panel.take() else { return };
-        if self.right == Some(RightPanel::Attachments) {
+        if self.mode == Mode::Read {
+            if self.right_before_read == Some(RightPanel::Attachments) {
+                self.right_before_read = before;
+            }
+        } else if self.right == Some(RightPanel::Attachments) {
             self.right = before;
-        } else if self.mode == Mode::Read && self.right_before_read == Some(RightPanel::Attachments) {
-            self.right_before_read = before;
         }
     }
 

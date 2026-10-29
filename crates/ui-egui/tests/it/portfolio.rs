@@ -220,6 +220,29 @@ fn read_mode_gives_back_the_panel_the_file_list_replaced() {
     assert_eq!(h.state().right, None, "the panel was closed before the list showed");
 }
 
+/// The initial document is a PDF by its bytes, not its name.
+#[test]
+fn an_initial_pdf_named_without_pdf_opens() {
+    let h = opened(portfolio("/Collection << /D (Form) >>", &[("Form", PAGE)]), true);
+    let (names, active) = tabs(&h);
+    assert_eq!(names.len(), 2, "{names:?}");
+    assert_ne!(active.as_deref(), Some("portfolio.pdf"));
+}
+
+/// A panel the reader picks in Read mode on the portfolio's tab stays when they switch tabs.
+#[test]
+fn a_panel_picked_in_read_mode_stays_when_the_tab_changes() {
+    let mut h = opened(portfolio("/Collection << /View /D >>", &[("form.pdf", PAGE)]), true);
+    h.state_mut().open_bytes("other.pdf", None, PAGE.to_vec()).unwrap();
+    h.run_steps(2);
+    select(&mut h, 0);
+    assert!(h.state_mut().execute("view.read_mode"));
+    h.run_steps(2);
+    h.state_mut().choose_right_panel(Some(RightPanel::Attachments));
+    select(&mut h, 1);
+    assert_eq!(h.state().right, Some(RightPanel::Attachments));
+}
+
 /// `/View /H` presents the initial document but leaves the file list to the reader.
 #[test]
 fn a_portfolio_that_keeps_its_list_hidden_still_presents_its_initial_document() {
