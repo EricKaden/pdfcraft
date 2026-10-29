@@ -54,6 +54,8 @@ impl PdfCraftApp {
             right_panel_closed: false,
             portfolio_initial: None,
             portfolio_seen: None,
+            #[cfg(target_arch = "wasm32")]
+            web_reads: Default::default(),
             portfolio_panel: None,
             quick_tool: QuickTool::Select,
             space_hand: None,

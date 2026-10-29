@@ -274,6 +274,10 @@ pub struct PdfCraftApp {
     portfolio_initial: Option<(DocId, usize)>,
     /// The document whose tab [`Self::present_portfolios`] last saw active.
     portfolio_seen: Option<DocId>,
+    /// Browser file reads still under way (drops, the web file picker): each file opens in front
+    /// when it arrives.
+    #[cfg(target_arch = "wasm32")]
+    web_reads: std::sync::Arc<std::sync::atomic::AtomicUsize>,
     /// A portfolio's file list is showing in place of this panel (`None`: the panel was
     /// closed), given back when its tab is left.
     portfolio_panel: Option<Option<RightPanel>>,

@@ -433,11 +433,12 @@ impl PdfCraftApp {
         // A prompt or picker over the window belongs to the document it was raised for (the
         // password of a file opened together with the portfolio, say): the initial document
         // waits for its answer, and opening it then would close the prompt. A file still
-        // opening in the background comes to the front when it arrives, so it is waited for too.
+        // opening in the background (in the open worker, or a browser read of a drop or a
+        // picked file) comes to the front when it arrives, so it is waited for too.
         #[cfg(not(target_arch = "wasm32"))]
         let busy = self.modal_open() || self.pickers.pending() || self.pending_opens.iter().any(|p| p.activate);
         #[cfg(target_arch = "wasm32")]
-        let busy = self.modal_open();
+        let busy = self.modal_open() || self.web_reads.load(std::sync::atomic::Ordering::Relaxed) > 0;
         if !busy
             && let Some((doc, index)) = self.portfolio_initial.take()
             && self.active_ids().is_some_and(|(_, id)| id == doc)
@@ -712,7 +713,9 @@ impl PdfCraftApp {
         {
             let inbox = self.inbox.clone();
             let ctx = self.ctx.clone();
+            let read = super::input::WebRead::start(&self.web_reads);
             wasm_bindgen_futures::spawn_local(async move {
+                let _read = read;
                 if let Some(h) = rfd::AsyncFileDialog::new()
                     .add_filter("PDF", &["pdf"])
                     .add_filter(tl!("Images and text"), &create_ui::CONVERTIBLE)
