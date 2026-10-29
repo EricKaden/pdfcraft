@@ -13,6 +13,15 @@ const PAGE: &[u8] = b"%PDF-1.7
 trailer << /Root 1 0 R >>
 %%EOF";
 
+/// A one-page PDF with a comment on its page.
+const NOTED: &[u8] = b"%PDF-1.7
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Annots [4 0 R] >> endobj
+4 0 obj << /Type /Annot /Subtype /Text /Rect [20 160 40 180] /Contents (Sign here) /T (HR) >> endobj
+trailer << /Root 1 0 R >>
+%%EOF";
+
 /// A one-page portfolio of `files` (name, bytes), with `catalog` (its `/Collection` and any other
 /// entries) in its catalog.
 fn portfolio(catalog: &str, files: &[(&str, &[u8])]) -> Vec<u8> {
@@ -101,10 +110,10 @@ fn a_portfolio_opens_its_initial_document_and_shows_its_files_with_the_panel_clo
 fn the_initial_document_opens_without_the_portfolios_file_list() {
     // The portfolio asks for the Attachments panel too (`/PageMode /UseAttachments`), and the
     // reader keeps the right panel open: the document it presents opens with the panels any other
-    // would, not with a file list of its own (it has none).
-    let mut h = opened(portfolio("/PageMode /UseAttachments /Collection << /D (form.pdf) >>", &[("intro.pdf", PAGE), ("form.pdf", PAGE)]), false);
+    // would, here on its comments, not with the portfolio's file list.
+    let mut h = opened(portfolio("/PageMode /UseAttachments /Collection << /D (form.pdf) >>", &[("intro.pdf", PAGE), ("form.pdf", NOTED)]), false);
     assert_eq!(tabs(&h).1.as_deref(), Some("form.pdf"));
-    assert_eq!(h.state().right, None);
+    assert_eq!(h.state().right, Some(RightPanel::Comments));
     select(&mut h, 0);
     assert_eq!(h.state().right, Some(RightPanel::Attachments));
 }
