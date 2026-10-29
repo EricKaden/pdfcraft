@@ -22,6 +22,21 @@ const NOTED: &[u8] = b"%PDF-1.7
 trailer << /Root 1 0 R >>
 %%EOF";
 
+/// [`PAGE`] encrypted, opening with the password `pw`.
+fn locked() -> Vec<u8> {
+    let mut doc = pdfcraft_cos::Document::open(std::sync::Arc::new(PAGE.to_vec())).unwrap();
+    doc.set_encryption(&pdfcraft_cos::NewEncryption {
+        algorithm: pdfcraft_cos::Algorithm::Aes256,
+        user_password: "pw",
+        owner_password: "owner",
+        permissions: -1,
+        encrypt_metadata: true,
+        seed: [4; 32],
+    })
+    .unwrap();
+    pdfcraft_cos::write_full(&doc, &Default::default()).unwrap()
+}
+
 /// A one-page portfolio of `files` (name, bytes), with `catalog` (its `/Collection` and any other
 /// entries) in its catalog.
 fn portfolio(catalog: &str, files: &[(&str, &[u8])]) -> Vec<u8> {
@@ -140,6 +155,32 @@ fn a_file_opened_after_the_portfolio_keeps_the_front() {
     assert_eq!(h.state().right, None);
     select(&mut h, 0);
     assert_eq!(h.state().right, Some(RightPanel::Attachments));
+}
+
+/// A password asked for a file opened together with the portfolio stays asked: the initial
+/// document waits for the answer, then gives way to that file, or opens once the prompt is
+/// cancelled.
+#[test]
+fn a_password_asked_for_a_file_opened_with_the_portfolio_stays_asked() {
+    for answer in [Some("pw".to_string()), None] {
+        let pdf = portfolio("/Collection << /D (form.pdf) >>", &[("form.pdf", PAGE)]);
+        let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_cc| {
+            let mut app = PdfCraftApp::new();
+            app.set_option("language", "en").unwrap();
+            app.open_bytes("portfolio.pdf", None, pdf.clone()).unwrap();
+            app.open_bytes("locked.pdf", None, locked()).unwrap();
+            app
+        });
+        h.run_steps(4);
+        assert!(h.state().password_prompt.is_some(), "the prompt for locked.pdf is still up");
+        assert_eq!(tabs(&h).0, ["portfolio.pdf"]);
+        let opened = if answer.is_some() { "locked.pdf" } else { "form.pdf" };
+        // The answered file opens in the background worker.
+        h.state_mut().submit_password(answer);
+        crate::support::wait_until(&mut h, "a second tab", |app| app.views.len() == 2);
+        h.run_steps(4);
+        assert_eq!(tabs(&h), (vec!["portfolio.pdf".into(), opened.into()], Some(opened.into())));
+    }
 }
 
 /// `/View /H` presents the initial document but leaves the file list to the reader.

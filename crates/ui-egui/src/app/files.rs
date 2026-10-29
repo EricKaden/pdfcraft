@@ -430,7 +430,16 @@ impl PdfCraftApp {
     /// Leaving the tab gives back the panel the list replaced, unless the reader changed panels
     /// meanwhile. Called every frame.
     pub(crate) fn present_portfolios(&mut self) {
-        if let Some((doc, index)) = self.portfolio_initial.take()
+        // A prompt or picker over the window belongs to the document it was raised for (the
+        // password of a file opened together with the portfolio, say): the initial document
+        // waits for its answer, and opening it then would close the prompt. A file still
+        // opening in the background comes to the front when it arrives, so it is waited for too.
+        #[cfg(not(target_arch = "wasm32"))]
+        let busy = self.modal_open() || self.pickers.pending() || self.pending_opens.iter().any(|p| p.activate);
+        #[cfg(target_arch = "wasm32")]
+        let busy = self.modal_open();
+        if !busy
+            && let Some((doc, index)) = self.portfolio_initial.take()
             && self.active_ids().is_some_and(|(_, id)| id == doc)
         {
             self.attachment_action(doc, index, true);
