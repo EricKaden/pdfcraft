@@ -108,7 +108,7 @@ fn to_text(bytes: &[u8]) -> String {
 /// An element of that name anywhere else (a data node, inside the template) is not it. XML that
 /// doesn't parse, or has a DTD, asks for nothing.
 pub(crate) fn requires_dynamic_render(xdp: &str) -> bool {
-    let opts = roxmltree::ParsingOptions { allow_dtd: false, nodes_limit: MAX_XDP_NODES };
+    let opts = roxmltree::ParsingOptions { allow_dtd: false, nodes_limit: MAX_XDP_NODES, ..Default::default() };
     let Ok(doc) = roxmltree::Document::parse_with_options(xdp, opts) else { return false };
     let root = doc.root_element();
     /// `n`'s first child element named `name` (any namespace).
